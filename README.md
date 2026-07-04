@@ -144,14 +144,19 @@ The deep dives, with the full set of diagrams, live in [`docs/`](docs/):
 Start every instance from `Bootstrap.unity`; the main menu drives the session:
 
 - **Host**, set a **lobby name** (defaults to the machine name), then host. Binds the gameplay port,
-  broadcasts the discovery beacon, runs the only authoritative simulation, and drives Player 1.
+  broadcasts the discovery beacon, and enters a **pre-game lobby** showing both player cards; the host
+  picks the level and presses **Start** once the partner is ready. In play the host runs the only
+  authoritative simulation and drives Player 1.
 - **Join**, pick a host from the auto-discovered **LAN games** list, or enter the host's IP manually
-  (default `127.0.0.1` for same-machine testing). The client drives Player 2.
-- **Solo**, single-player on one machine (drive both input halves yourself).
-- **Leave**, graceful disconnect (sends `GOODBYE`) back to the menu.
+  (default `127.0.0.1` for same-machine testing). The client lands in the lobby, toggles **Ready**, and
+  drives Player 2 once the host starts. (Ready-up rides the reliable `EVENT` channel, protocol v3.)
+- **Solo**, single-player on one machine (drive both input halves yourself), no lobby.
+- **Leave**, graceful disconnect (sends `GOODBYE`) back to the menu, from the lobby or mid-game.
 
-If a peer drops, the surviving side pauses with a "connection lost" overlay: the client can **Rejoin**
-(resuming into the host's current level) or return to the menu; the host keeps its progress and waits.
+If a peer drops mid-game, the surviving side pauses with a "connection lost" overlay: the client can
+**Rejoin** (resuming into the host's current level, skipping the lobby) or return to the menu; the host
+keeps its progress and waits. A drop while still in the lobby simply returns the host's lobby to its
+waiting state.
 
 **Two-machine play** needs two people, only the focused OS window receives keyboard input. For solo
 iteration, [ParrelSync](https://github.com/VeriorPies/ParrelSync) runs two editor instances against

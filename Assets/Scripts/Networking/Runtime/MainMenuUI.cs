@@ -55,7 +55,8 @@ namespace JumpNowBro.Networking
                     UiKit.EnsureSelection(lostRejoinBtn.gameObject.activeSelf ? lostRejoinBtn.gameObject : lostReturnBtn.gameObject);
             }
             bool inGame = !idle && !net.ConnectionLost;                          // a loss is owned by the connection-lost overlay below
-            if (leaveBar.activeSelf != inGame) leaveBar.SetActive(inGame);
+            bool showLeaveBar = inGame && !net.InLobby;                          // v2.3: the lobby has its own Leave button
+            if (leaveBar.activeSelf != showLeaveBar) leaveBar.SetActive(showLeaveBar);
 
             bool showPing = inGame && net.Role != GameRole.SinglePlayer;         // RTT only exists with a peer, not in Solo
             if (pingLabel.gameObject.activeSelf != showPing) pingLabel.gameObject.SetActive(showPing);
@@ -75,13 +76,11 @@ namespace JumpNowBro.Networking
                                          && net.ConnectionUnstable;
             if (unstableLabel.gameObject.activeSelf != showUnstable) unstableLabel.gameObject.SetActive(showUnstable);
 
-            // Pre-game status while no level is up: the client is dialing the host (it re-probes for ~15 s, #120),
-            // or the host is listening for a peer. Keeps the blank pre-session screen from reading as a hang.
-            bool connecting = !net.ConnectionLost && net.Role == GameRole.Client && s == Session.SessionState.Connecting;
-            bool waiting    = !net.ConnectionLost && net.Role == GameRole.Hosting && s != Session.SessionState.Established;
-            bool showStatus = connecting || waiting;
+            // Pre-game status: only the client's dialing state remains here (it re-probes for ~15 s, #120).
+            // The hosting "waiting for a player" surface moved into the lobby's partner card (v2.3).
+            bool showStatus = !net.ConnectionLost && net.Role == GameRole.Client && s == Session.SessionState.Connecting;
             if (statusBanner.gameObject.activeSelf != showStatus) statusBanner.gameObject.SetActive(showStatus);
-            if (showStatus) statusBanner.text = connecting ? "Connecting to host..." : "Waiting for a player to join...";
+            if (showStatus) statusBanner.text = "Connecting to host...";
 
             bool lost = net.ConnectionLost;
             if (lostOverlay.activeSelf != lost)
