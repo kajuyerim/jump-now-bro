@@ -23,6 +23,7 @@ namespace JumpNowBro.Gameplay
         const string KVSync      = "display.vsync";
         const string KQuality    = "display.quality";
         const string KPalette    = "access.palette";
+        const string KOverrides  = "input.overrides";
 
         // ---- getters (defaults match AudioManager's serialized seeds) ----
         public static float MasterVolume => PlayerPrefs.GetFloat(KMaster, 1f);
@@ -87,6 +88,11 @@ namespace JumpNowBro.Gameplay
             PlayerIdentity.SetPalette(mode == 1);
             SwapTrigger.RetintAll();
         }
+
+        // ---- input rebinds (#135; InputRebinds owns apply/restore, this is just the storage) ----
+
+        public static string InputOverrides => PlayerPrefs.GetString(KOverrides, "");
+        public static void SetInputOverrides(string json) => PlayerPrefs.SetString(KOverrides, json ?? "");
 
         public static void Flush() => PlayerPrefs.Save();
 

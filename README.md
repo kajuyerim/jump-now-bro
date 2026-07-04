@@ -71,7 +71,9 @@ split keyboard.
 | Jump | Left Shift | Space |
 | Dash | Left Ctrl | Right Shift |
 
-**LAN (each player on their own keyboard):** Move = WASD or arrows, Jump = Space, Dash = Left or Right Shift.
+**LAN (each player on their own keyboard):** both solo layouts work for everyone, Move = WASD or arrows,
+Jump = Space or Left Shift, Dash = Right Shift or Left Ctrl. Every binding is remappable per player half
+in Settings, Controls (rebinds apply to solo and LAN alike).
 
 ## How it's built (at a glance)
 

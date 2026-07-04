@@ -492,8 +492,19 @@
                 },
                 {
                     "name": "",
-                    "id": "c5cbce8e-0824-4086-90d5-d42a7415a923",
+                    "id": "e00a860b-7b13-4453-a3e6-5c658773ae96",
                     "path": "<Keyboard>/leftShift",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "Keyboard",
+                    "action": "Jump",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
+                    "id": "c5cbce8e-0824-4086-90d5-d42a7415a923",
+                    "path": "<Keyboard>/leftCtrl",
                     "interactions": "",
                     "processors": "",
                     "groups": "Keyboard",

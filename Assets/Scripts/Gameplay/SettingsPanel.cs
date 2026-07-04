@@ -34,6 +34,13 @@ namespace JumpNowBro.Gameplay
         TMP_Text muteLabel, fullscreenLabel, vsyncLabel, resLabel, qualityLabel, paletteLabel;
         GameObject firstSelectable;
 
+        // #135 tabs + rebind cells
+        GameObject[] tabs;
+        Image[] tabButtons;
+        int activeTab;
+        TMP_Text rebindStatus, p1Header, p2Header;
+        readonly List<(InputRebinds.Cell cell, TMP_Text label)> rebindCells = new List<(InputRebinds.Cell, TMP_Text)>();
+
         readonly List<Vector2Int> resOptions = new List<Vector2Int>();
         int resIndex;
         int qualityIndex;
@@ -54,6 +61,15 @@ namespace JumpNowBro.Gameplay
 
         void Update()
         {
+            // #135: while a rebind is listening (and through the frame its cancel lands on — the Input
+            // System processes the cancel BEFORE MonoBehaviour.Update), Esc/Start belong to the rebind,
+            // not the panel toggle.
+            if (InputRebinds.SuppressUiToggle)
+            {
+                fieldFocusedLastFrame = TypingInInputField();
+                return;
+            }
+
             // Esc while typing in a TMP_InputField (menu name/lobby/IP) cancels the edit; it must not ALSO
             // open settings. The field releases focus on the SAME frame the cancel lands (before or after
             // this Update depending on execution order), so a same-frame isFocused check misses it: remember
@@ -110,6 +126,7 @@ namespace JumpNowBro.Gameplay
             fullscreenLabel.text = "Fullscreen: " + (GameSettings.Fullscreen ? "On" : "Off");
             vsyncLabel.text = "VSync: " + (GameSettings.VSync ? "On" : "Off");
             paletteLabel.text = "Colourblind palette: " + (GameSettings.PaletteMode != 0 ? "On" : "Off");
+            RefreshRebindLabels();   // saved overrides may have restored after this panel was built
             RefreshResLabel();
             qualityIndex = Mathf.Clamp(GameSettings.QualityLevel, 0, Mathf.Max(0, QualitySettings.names.Length - 1));
             RefreshQualityLabel();
@@ -153,44 +170,152 @@ namespace JumpNowBro.Gameplay
 
             Label(card.transform, "Settings", 34, FontStyles.Bold, 0.95f);
 
-            Label(card.transform, "Audio", 20, FontStyles.Bold, 0.7f);
-            masterSlider = SliderRow(card.transform, "Master", GameSettings.SetMasterVolume);
-            musicSlider  = SliderRow(card.transform, "Music",  GameSettings.SetMusicVolume);
-            sfxSlider    = SliderRow(card.transform, "SFX",    GameSettings.SetSFXVolume);
-            firstSelectable = masterSlider.gameObject;
-            muteLabel = ToggleButton(card.transform, () =>
+            // #135: tabs (the controls grid would overflow a single column). Content lives in per-tab
+            // columns under the same card; SelectTab toggles visibility and the fitter re-sizes the card.
+            var tabBar = Row(card.transform);
+            string[] tabNames = { "Audio", "Display", "Controls", "Access" };
+            tabs = new GameObject[tabNames.Length];
+            tabButtons = new Image[tabNames.Length];
+            for (int i = 0; i < tabNames.Length; i++)
+            {
+                int idx = i;
+                var b = MakeButton(tabBar.transform, tabNames[i], 86, 34, () => SelectTab(idx));
+                tabButtons[i] = b.GetComponent<Image>();
+                tabs[i] = Column(card.transform);
+            }
+
+            // -- Audio --
+            var audio = tabs[0].transform;
+            masterSlider = SliderRow(audio, "Master", GameSettings.SetMasterVolume);
+            musicSlider  = SliderRow(audio, "Music",  GameSettings.SetMusicVolume);
+            sfxSlider    = SliderRow(audio, "SFX",    GameSettings.SetSFXVolume);
+            muteLabel = ToggleButton(audio, () =>
             {
                 bool m = !GameSettings.Muted; GameSettings.SetMuted(m);
                 muteLabel.text = "Mute: " + (m ? "On" : "Off");
             });
 
-            Label(card.transform, "Display", 20, FontStyles.Bold, 0.7f);
-            resLabel = CyclerRow(card.transform, "Resolution", () => StepResolution(-1), () => StepResolution(1));
-            fullscreenLabel = ToggleButton(card.transform, () =>
+            // -- Display --
+            var display = tabs[1].transform;
+            resLabel = CyclerRow(display, "Resolution", () => StepResolution(-1), () => StepResolution(1));
+            fullscreenLabel = ToggleButton(display, () =>
             {
                 bool on = !GameSettings.Fullscreen; GameSettings.SetFullscreen(on);
                 fullscreenLabel.text = "Fullscreen: " + (on ? "On" : "Off");
             });
-            vsyncLabel = ToggleButton(card.transform, () =>
+            vsyncLabel = ToggleButton(display, () =>
             {
                 bool on = !GameSettings.VSync; GameSettings.SetVSync(on);
                 vsyncLabel.text = "VSync: " + (on ? "On" : "Off");
             });
             if (QualitySettings.names.Length > 1)
-                qualityLabel = CyclerRow(card.transform, "Quality", () => StepQuality(-1), () => StepQuality(1));
+                qualityLabel = CyclerRow(display, "Quality", () => StepQuality(-1), () => StepQuality(1));
+            Label(display, "Resolution / fullscreen apply in a standalone build, not the Editor.", 13, FontStyles.Italic, 0.5f);
 
-            // #136 accessibility: colourblind palette switch (Okabe-Ito through ActionStyle + PlayerIdentity).
-            Label(card.transform, "Access", 20, FontStyles.Bold, 0.7f);
-            paletteLabel = ToggleButton(card.transform, () =>
+            // -- Controls (#135) --
+            BuildControlsTab(tabs[2].transform);
+
+            // -- Access (#136: colourblind palette through ActionStyle + PlayerIdentity) --
+            paletteLabel = ToggleButton(tabs[3].transform, () =>
             {
                 int mode = GameSettings.PaletteMode != 0 ? 0 : 1;
                 GameSettings.SetPaletteMode(mode);
                 paletteLabel.text = "Colourblind palette: " + (mode != 0 ? "On" : "Off");
             });
 
-            Label(card.transform, "Resolution / fullscreen apply in a standalone build, not the Editor.", 13, FontStyles.Italic, 0.5f);
-
             MakeButton(card.transform, "Back", 360, 48, Close);
+            SelectTab(0);
+        }
+
+        void SelectTab(int index)
+        {
+            activeTab = index;
+            for (int i = 0; i < tabs.Length; i++)
+            {
+                tabs[i].SetActive(i == index);
+                tabButtons[i].color = i == index ? new Color(0.30f, 0.55f, 0.95f, 1f) : new Color(1f, 1f, 1f, 0.15f);
+            }
+            firstSelectable = tabButtons[index].gameObject;
+            if (IsOpen && EventSystem.current != null)
+                EventSystem.current.SetSelectedGameObject(firstSelectable);
+        }
+
+        // A P1 | P2 grid over the SOLO maps (the two halves' identities), one row per action; keyboard
+        // rebinds mirror into the shared LAN layout inside InputRebinds. Shared gamepad cells sit below.
+        void BuildControlsTab(Transform parent)
+        {
+            Label(parent, "Click a binding, then press the new key/button. Esc cancels.", 13, FontStyles.Italic, 0.5f);
+
+            var header = Row(parent);
+            RowLabel(header.transform, "");
+            p1Header = HeaderCell(header.transform, "P1");
+            p2Header = HeaderCell(header.transform, "P2");
+
+            rebindCells.Clear();
+            var rows = new Dictionary<string, GameObject>();
+            bool padSection = false;
+            foreach (var cell in InputRebinds.Cells())
+            {
+                if (cell.Column < 0 && !padSection)
+                {
+                    padSection = true;
+                    Label(parent, "Gamepad (both players)", 14, FontStyles.Italic, 0.6f);
+                }
+                if (!rows.TryGetValue(cell.Label, out var row))
+                {
+                    row = Row(parent);
+                    RowLabel(row.transform, cell.Label);
+                    rows[cell.Label] = row;   // P1 cells arrive before P2 cells, so columns land in order
+                }
+                var btn = MakeButton(row.transform, InputRebinds.DisplayName(cell), 130, 34, null);
+                var label = btn.GetComponentInChildren<TMP_Text>();
+                var captured = cell;
+                btn.onClick.AddListener(() => BeginRebind(captured, label));
+                rebindCells.Add((captured, label));
+            }
+            rebindStatus = Label(parent, "", 14, FontStyles.Italic, 0.85f);
+            MakeButton(parent, "Reset to defaults", 360, 40, () =>
+            {
+                InputRebinds.ResetAll();
+                RefreshRebindLabels();
+                rebindStatus.text = "Controls reset to defaults";
+            });
+        }
+
+        TMP_Text HeaderCell(Transform parent, string text)
+        {
+            var go = new GameObject("Head", typeof(RectTransform), typeof(LayoutElement));
+            go.transform.SetParent(parent, false);
+            var t = go.AddComponent<TextMeshProUGUI>();
+            t.text = text;
+            t.fontSize = 17;
+            t.fontStyle = FontStyles.Bold;
+            t.alignment = TextAlignmentOptions.Center;
+            t.raycastTarget = false;
+            var le = go.GetComponent<LayoutElement>();
+            le.preferredWidth = le.minWidth = 130f;
+            le.preferredHeight = 24f;
+            return t;
+        }
+
+        void BeginRebind(InputRebinds.Cell cell, TMP_Text label)
+        {
+            if (InputRebinds.Listening) return;
+            label.text = "Press...";
+            rebindStatus.text = "";
+            InputRebinds.StartRebind(cell, error =>
+            {
+                RefreshRebindLabels();
+                rebindStatus.text = error ?? "";
+            });
+        }
+
+        void RefreshRebindLabels()
+        {
+            foreach (var (cell, label) in rebindCells) label.text = InputRebinds.DisplayName(cell);
+            // Header colours follow the active palette (the colourblind toggle lives in this same panel).
+            if (p1Header != null) p1Header.color = PlayerIdentity.ColorOf(JumpNowBro.Util.InputOwner.P1);
+            if (p2Header != null) p2Header.color = PlayerIdentity.ColorOf(JumpNowBro.Util.InputOwner.P2);
         }
 
         // ---- display steppers ----
@@ -272,6 +397,20 @@ namespace JumpNowBro.Gameplay
             t.raycastTarget = false;
             go.GetComponent<LayoutElement>().preferredHeight = size + 8f;
             return t;
+        }
+
+        // A tab's content column: nested vertical group under the card (no fitter — the card's layout
+        // group reads the group's preferred height directly; a nested ContentSizeFitter would fight it).
+        GameObject Column(Transform parent)
+        {
+            var go = new GameObject("Tab", typeof(RectTransform), typeof(VerticalLayoutGroup));
+            go.transform.SetParent(parent, false);
+            var v = go.GetComponent<VerticalLayoutGroup>();
+            v.childAlignment = TextAnchor.UpperCenter;
+            v.spacing = 8;
+            v.childControlWidth = v.childControlHeight = true;
+            v.childForceExpandWidth = v.childForceExpandHeight = false;
+            return go;
         }
 
         GameObject Row(Transform parent)
