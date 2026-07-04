@@ -21,7 +21,7 @@ namespace JumpNowBro.Networking
         GameObject menu, leaveBar, lostOverlay;
         TMP_InputField ipField, lobbyField, nameField;
         TMP_Text lostTitle, lostMsg, lostWaitLabel, pingLabel, statusBanner, unstableLabel;
-        Button lostRejoinBtn;
+        Button lostRejoinBtn, lostReturnBtn, soloBtn;
         float nextPingRefresh;
         readonly Button[] levelButtons = new Button[3];
         DiscoveryService browse;                                           // passive LAN listener while the menu is up
@@ -40,7 +40,20 @@ namespace JumpNowBro.Networking
         {
             var s = net.CurrentSessionState;
             bool idle = !net.SoloActive && (s == null || s == Session.SessionState.Disconnected) && net.Role == GameRole.SinglePlayer;
-            if (menu.activeSelf != idle) menu.SetActive(idle);
+            if (menu.activeSelf != idle)
+            {
+                menu.SetActive(idle);
+                if (idle) UnityEngine.EventSystems.EventSystem.current?.SetSelectedGameObject(soloBtn.gameObject);
+            }
+            // #134: keep a selection alive while a full-screen surface is up, so gamepad/keyboard navigation
+            // always has somewhere to start (a background click or destroyed object can null the selection).
+            // The settings panel (sortingOrder 200) owns selection while open — don't fight it from below.
+            if (SettingsPanel.Instance == null || !SettingsPanel.Instance.IsOpen)
+            {
+                if (menu.activeSelf) UiKit.EnsureSelection(soloBtn.gameObject);
+                else if (lostOverlay.activeSelf)
+                    UiKit.EnsureSelection(lostRejoinBtn.gameObject.activeSelf ? lostRejoinBtn.gameObject : lostReturnBtn.gameObject);
+            }
             bool inGame = !idle && !net.ConnectionLost;                          // a loss is owned by the connection-lost overlay below
             if (leaveBar.activeSelf != inGame) leaveBar.SetActive(inGame);
 
@@ -132,7 +145,7 @@ namespace JumpNowBro.Networking
                 levelButtons[i] = MakeButton(lvlRow.transform, "Level " + (i + 1), 150, 54, () => SelectLevel(idx));
             }
 
-            MakeButton(col.transform, "Solo (single-player)", 330, 54, () => { DisposeBrowse(); net.BeginSoloFromUi(); });
+            soloBtn = MakeButton(col.transform, "Solo (single-player)", 330, 54, () => { DisposeBrowse(); net.BeginSoloFromUi(); });
 
             Label(col.transform, "Your name (shown to your partner):", 16, FontStyles.Italic);
             nameField = MakeInput(col.transform, "NameField", DefaultPlayerName(), 330, 50);
@@ -243,7 +256,7 @@ namespace JumpNowBro.Networking
             lostMsg       = Label(card.transform, "", 19, FontStyles.Normal);
             lostWaitLabel = Label(card.transform, "Waiting for the other player to rejoin...", 17, FontStyles.Italic);
             lostRejoinBtn = MakeButton(card.transform, "Rejoin", 320, 50, () => net.RejoinFromUi());
-            MakeButton(card.transform, "Return to menu", 320, 50, () => net.EndSessionFromUi());
+            lostReturnBtn = MakeButton(card.transform, "Return to menu", 320, 50, () => net.EndSessionFromUi());
             lostOverlay.SetActive(false);
         }
 

@@ -59,10 +59,15 @@ namespace JumpNowBro.Gameplay
             // this Update depending on execution order), so a same-frame isFocused check misses it: remember
             // last frame's focus too. The Esc after that one opens settings as normal.
             bool focusedNow = TypingInInputField();
-            if (Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame
-                && !focusedNow && !fieldFocusedLastFrame)
-                Toggle();
+            bool esc = Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame;
+            // #134 gamepad: Start toggles; East closes (mirrors the UI Cancel convention).
+            bool padStart = Gamepad.current != null && Gamepad.current.startButton.wasPressedThisFrame;
+            bool padBack = IsOpen && Gamepad.current != null && Gamepad.current.buttonEast.wasPressedThisFrame;
+            if ((esc && !focusedNow && !fieldFocusedLastFrame) || padStart) Toggle();
+            else if (padBack) Close();
             fieldFocusedLastFrame = focusedNow;
+
+            if (IsOpen) UiKit.EnsureSelection(firstSelectable);   // pad/keyboard nav always has a starting point
         }
 
         bool fieldFocusedLastFrame;
