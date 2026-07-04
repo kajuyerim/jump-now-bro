@@ -175,9 +175,16 @@ namespace JumpNowBro.Gameplay
             }
         }
 
+        /// #136: re-tint every banner from the (possibly switched) ActionStyle palette. Banner colour is
+        /// applied only in SetBannerArmed, so re-calling it with the current armed state is a full refresh.
+        public static void RetintAll()
+        {
+            foreach (var t in active) t.SetBannerArmed(t.bannerArmed);
+        }
+
         void SetBannerArmed(bool armed)
         {
-            bannerArmed = armed;                 // gates the #127 telegraph; Update drives the colour while armed
+            bannerArmed = armed;                 // gates the #127 telegraph (proximity vignette)
             if (banner == null) return;
             banner.color = armed ? ColorFor(actionToSwap, armedAlpha) : firedColor;
         }

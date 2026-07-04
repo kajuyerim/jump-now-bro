@@ -29,16 +29,19 @@ namespace JumpNowBro.Gameplay
         // #126 edge flash
         CanvasGroup flashGroup;
         Image flashLeftCore, flashRightCore;
+        Image flashIconL, flashIconR;              // #136: per-action icon, the non-colour channel on the flash
         Coroutine flashRoutine;
         static Sprite edgeGradientL, edgeGradientR;
 
         // #127 proximity pulse (a gentle screen vignette in the upcoming action's colour when very near an armed trigger)
         CanvasGroup proximityGroup;
         Image proximityImage;
+        Image proximityIcon;                       // #136: action icon, OWN alpha (the vignette group caps at 0.4, too faint for a glyph)
         static Sprite vignetteSprite;
         float proximityBestT;
         bool proximityReported;
         const float ProximityMaxAlpha = 0.4f;
+        const float ProximityIconMaxAlpha = 0.8f;
 
         void Awake()
         {
@@ -59,6 +62,12 @@ namespace JumpNowBro.Gameplay
         {
             if (proximityGroup == null) return;
             proximityGroup.alpha = proximityReported ? proximityBestT * ProximityMaxAlpha : 0f;
+            if (proximityIcon != null)
+            {
+                var c = proximityIcon.color;
+                c.a = proximityReported ? proximityBestT * ProximityIconMaxAlpha : 0f;
+                proximityIcon.color = c;
+            }
             proximityReported = false;
             proximityBestT = 0f;
         }
@@ -177,6 +186,27 @@ namespace JumpNowBro.Gameplay
             // player the change affects, so the action colour alone identifies it; no player-colour rim needed.
             flashLeftCore  = MakeEdgeStrip(root.transform, leftSide: true,  width: 200f);
             flashRightCore = MakeEdgeStrip(root.transform, leftSide: false, width: 200f);
+
+            // #136: the flash was colour-only — add the action's icon at each edge's vertical centre. Children
+            // of the flash root, so the existing CanvasGroup animates them with the strips for free.
+            flashIconL = MakeEdgeIcon(root.transform, leftSide: true);
+            flashIconR = MakeEdgeIcon(root.transform, leftSide: false);
+        }
+
+        static Image MakeEdgeIcon(Transform parent, bool leftSide)
+        {
+            var go = new GameObject(leftSide ? "EdgeIconL" : "EdgeIconR", typeof(RectTransform), typeof(Image));
+            go.transform.SetParent(parent, false);
+            var img = go.GetComponent<Image>();
+            img.color = Color.white;
+            img.raycastTarget = false;
+            img.preserveAspect = true;
+            var rt = go.GetComponent<RectTransform>();
+            rt.anchorMin = rt.anchorMax = new Vector2(leftSide ? 0f : 1f, 0.5f);
+            rt.pivot = new Vector2(0.5f, 0.5f);
+            rt.anchoredPosition = new Vector2(leftSide ? 48f : -48f, 0f);
+            rt.sizeDelta = new Vector2(64f, 64f);
+            return img;
         }
 
         // A side-anchored full-height strip using the edge-gradient sprite (opaque at the screen edge, fading inward).
@@ -226,6 +256,9 @@ namespace JumpNowBro.Gameplay
         {
             if (flashGroup == null) return;
             flashLeftCore.color = flashRightCore.color = ActionStyle.ColorOf(action);
+            var icon = ActionStyle.IconOf(action);                     // #136: icon = non-colour identity
+            flashIconL.sprite = flashIconR.sprite = icon;
+            flashIconL.enabled = flashIconR.enabled = icon != null;
             if (flashRoutine != null) StopCoroutine(flashRoutine);
             flashRoutine = StartCoroutine(FlashRoutine());
         }
@@ -267,6 +300,21 @@ namespace JumpNowBro.Gameplay
             proximityGroup.alpha = 0f;
             proximityGroup.blocksRaycasts = false;
             proximityGroup.interactable = false;
+
+            // #136: the upcoming action's icon, bottom-centre. Parented to the overlay root (NOT the vignette
+            // group: its alpha caps at 0.4, too faint for a readable glyph) with its own alpha in LateUpdate.
+            var icon = new GameObject("SwapProximityIcon", typeof(RectTransform), typeof(Image));
+            icon.transform.SetParent(transform, false);
+            proximityIcon = icon.GetComponent<Image>();
+            proximityIcon.color = new Color(1f, 1f, 1f, 0f);
+            proximityIcon.raycastTarget = false;
+            proximityIcon.preserveAspect = true;
+            proximityIcon.enabled = false;
+            var irt = icon.GetComponent<RectTransform>();
+            irt.anchorMin = irt.anchorMax = new Vector2(0.5f, 0f);
+            irt.pivot = new Vector2(0.5f, 0f);
+            irt.anchoredPosition = new Vector2(0f, 36f);
+            irt.sizeDelta = new Vector2(48f, 48f);
         }
 
         /// An armed SwapTrigger within a few body-lengths reports itself each frame: how close (t: 0 at the outer
@@ -279,6 +327,9 @@ namespace JumpNowBro.Gameplay
             proximityReported = true;
             proximityBestT = Mathf.Clamp01(t);
             proximityImage.color = ActionStyle.ColorOf(action);
+            var icon = ActionStyle.IconOf(action);                     // #136: which action is coming, without colour
+            proximityIcon.sprite = icon;
+            proximityIcon.enabled = icon != null;
         }
 
         // Soft radial vignette: transparent centre, colour ramping in toward the screen edges/corners.

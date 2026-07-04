@@ -31,7 +31,7 @@ namespace JumpNowBro.Gameplay
 
         GameObject root;                                  // the dim + card; toggled on/off
         Slider masterSlider, musicSlider, sfxSlider;
-        TMP_Text muteLabel, fullscreenLabel, vsyncLabel, resLabel, qualityLabel;
+        TMP_Text muteLabel, fullscreenLabel, vsyncLabel, resLabel, qualityLabel, paletteLabel;
         GameObject firstSelectable;
 
         readonly List<Vector2Int> resOptions = new List<Vector2Int>();
@@ -109,6 +109,7 @@ namespace JumpNowBro.Gameplay
             BuildResolutionOptions();
             fullscreenLabel.text = "Fullscreen: " + (GameSettings.Fullscreen ? "On" : "Off");
             vsyncLabel.text = "VSync: " + (GameSettings.VSync ? "On" : "Off");
+            paletteLabel.text = "Colourblind palette: " + (GameSettings.PaletteMode != 0 ? "On" : "Off");
             RefreshResLabel();
             qualityIndex = Mathf.Clamp(GameSettings.QualityLevel, 0, Mathf.Max(0, QualitySettings.names.Length - 1));
             RefreshQualityLabel();
@@ -177,6 +178,15 @@ namespace JumpNowBro.Gameplay
             });
             if (QualitySettings.names.Length > 1)
                 qualityLabel = CyclerRow(card.transform, "Quality", () => StepQuality(-1), () => StepQuality(1));
+
+            // #136 accessibility: colourblind palette switch (Okabe-Ito through ActionStyle + PlayerIdentity).
+            Label(card.transform, "Access", 20, FontStyles.Bold, 0.7f);
+            paletteLabel = ToggleButton(card.transform, () =>
+            {
+                int mode = GameSettings.PaletteMode != 0 ? 0 : 1;
+                GameSettings.SetPaletteMode(mode);
+                paletteLabel.text = "Colourblind palette: " + (mode != 0 ? "On" : "Off");
+            });
 
             Label(card.transform, "Resolution / fullscreen apply in a standalone build, not the Editor.", 13, FontStyles.Italic, 0.5f);
 

@@ -22,6 +22,7 @@ namespace JumpNowBro.Gameplay
         const string KFullscreen = "display.fullscreen";
         const string KVSync      = "display.vsync";
         const string KQuality    = "display.quality";
+        const string KPalette    = "access.palette";
 
         // ---- getters (defaults match AudioManager's serialized seeds) ----
         public static float MasterVolume => PlayerPrefs.GetFloat(KMaster, 1f);
@@ -70,6 +71,23 @@ namespace JumpNowBro.Gameplay
         public static int ResWidth     => PlayerPrefs.GetInt(KResW, Screen.width);
         public static int ResHeight    => PlayerPrefs.GetInt(KResH, Screen.height);
 
+        // ---- accessibility (#136) ----
+
+        public static int PaletteMode => PlayerPrefs.GetInt(KPalette, 0);   // 0 default, 1 colourblind
+
+        /// Persist + live-apply the palette through the two single colour sources. PlayerIdentity.SetPalette
+        /// fires OnChanged (the HUD strip re-renders, which also re-reads ActionStyle); armed trigger banners
+        /// are the one persistent surface outside that event, hence RetintAll. Transient cues (announcement,
+        /// flash, vignette, ghosts) sample colour at fire time and need no refresh.
+        public static void SetPaletteMode(int mode)
+        {
+            mode = mode != 0 ? 1 : 0;
+            PlayerPrefs.SetInt(KPalette, mode);
+            ActionStyle.SetPalette(mode == 1 ? ActionStyle.PaletteKind.Colourblind : ActionStyle.PaletteKind.Default);
+            PlayerIdentity.SetPalette(mode == 1);
+            SwapTrigger.RetintAll();
+        }
+
         public static void Flush() => PlayerPrefs.Save();
 
         /// Restore display prefs before the first scene loads (audio is restored later by AudioManager.Start,
@@ -77,6 +95,13 @@ namespace JumpNowBro.Gameplay
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         static void ApplyDisplayOnLaunch()
         {
+            // #136: restore the palette first — pure statics, safe pre-scene; no triggers exist yet to retint.
+            if (PaletteMode != 0)
+            {
+                ActionStyle.SetPalette(ActionStyle.PaletteKind.Colourblind);
+                PlayerIdentity.SetPalette(true);
+            }
+
             QualitySettings.vSyncCount = VSync ? 1 : 0;
             if (PlayerPrefs.HasKey(KQuality))
                 QualitySettings.SetQualityLevel(Mathf.Clamp(QualityLevel, 0, Mathf.Max(0, QualitySettings.names.Length - 1)), true);
