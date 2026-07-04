@@ -10,7 +10,9 @@ namespace JumpNowBro.Networking
     public static class SessionProtocol
     {
         public const uint Magic = 0x4A4E4252;   // 'J' 'N' 'B' 'R'
-        public const ushort Version = 2;         // v2: HELLO/WELCOME now carry a display name + colour index (#114, #125)
+        public const ushort Version = 3;         // v3: lobby EVENT kinds (LobbyReady/LobbyState, #142) — a pre-lobby peer
+                                                 // would silently drop them and hang in an invisible lobby, so version
+                                                 // skew fails at the handshake instead. (v2 added name+colour, #114/#125.)
 
         /// Validate a raw inbound datagram as a well-formed, current-version HELLO — used by the host's
         /// listen phase before it commits to a peer. HELLO rides the reliable channel, so its body sits

@@ -87,14 +87,17 @@ namespace JumpNowBro.Networking
         }
     }
 
-    /// EVENT.kind discriminator. LevelLoad/Swap/Death flow host → client; LevelReady flows client → host
-    /// (the load-barrier ack). The body shape differs per kind — see EventBody.
+    /// EVENT.kind discriminator. LevelLoad/Swap/Death/LobbyState flow host → client; LevelReady (the
+    /// load-barrier ack) and LobbyReady (the pre-game ready toggle) flow client → host. The body shape
+    /// differs per kind — see EventBody.
     public enum EventKind : byte
     {
         LevelLoad  = 0,
         Swap       = 1,
         Death      = 2,
         LevelReady = 3,
+        LobbyReady = 4,    // client → host: 1-byte ready flag (v2.3 lobby)
+        LobbyState = 5,    // host → client: 1-byte selected level, so the client's lobby shows the pick
     }
 
     /// EVENT body (reliable channel). A discriminated union keyed on `kind`; each variant validates its own
@@ -104,10 +107,11 @@ namespace JumpNowBro.Networking
     public struct EventBody
     {
         public EventKind kind;
-        public byte sceneIndex;     // LevelLoad / LevelReady
+        public byte sceneIndex;     // LevelLoad / LevelReady / LobbyState (the host's selected level)
         public uint tick;           // Swap: apply_at_tick · Death: deathTick (both client input-ticks)
         public ControlMap map;      // Swap: new absolute map · Death: checkpoint map to restore
         public byte triggerId;      // Swap: which physical SwapTrigger fired (client banner targeting)
+        public byte ready;          // LobbyReady: 0|1 (strict on read, like ControlMap owners)
 
         // Largest variant (Swap) bounds the send scratch buffer; variants write fewer bytes.
         public const int MaxSize = 1 + 4 + ControlMap.PackedSize + 1;   // = 9
@@ -118,6 +122,10 @@ namespace JumpNowBro.Networking
             new EventBody { kind = EventKind.Swap, tick = applyTick, map = map, triggerId = triggerId };
         public static EventBody Death(uint deathTick, ControlMap checkpointMap) =>
             new EventBody { kind = EventKind.Death, tick = deathTick, map = checkpointMap };
+        public static EventBody LobbyReady(bool isReady) =>
+            new EventBody { kind = EventKind.LobbyReady, ready = isReady ? (byte)1 : (byte)0 };
+        public static EventBody LobbyState(byte selectedLevel) =>
+            new EventBody { kind = EventKind.LobbyState, sceneIndex = selectedLevel };
 
         public int Write(Span<byte> dst)
         {
@@ -138,6 +146,12 @@ namespace JumpNowBro.Networking
                     w.WriteUInt(tick);
                     ControlMap.Pack(map, w.Reserve(ControlMap.PackedSize));
                     break;
+                case EventKind.LobbyReady:
+                    w.WriteByte(ready);
+                    break;
+                case EventKind.LobbyState:
+                    w.WriteByte(sceneIndex);
+                    break;
             }
             return w.Position;
         }
@@ -147,13 +161,17 @@ namespace JumpNowBro.Networking
             body = default;
             var r = new ByteReader(src);
             if (!r.TryReadByte(out var k)) return false;
-            if (k > (byte)EventKind.LevelReady) return false;          // reject kinds we don't define
+            if (k > (byte)EventKind.LobbyState) return false;          // reject kinds we don't define
             body.kind = (EventKind)k;
             switch (body.kind)
             {
                 case EventKind.LevelLoad:
                 case EventKind.LevelReady:
+                case EventKind.LobbyState:
                     return r.TryReadByte(out body.sceneIndex);
+                case EventKind.LobbyReady:
+                    if (!r.TryReadByte(out body.ready)) return false;
+                    return body.ready <= 1;                            // strict: a flag byte is 0 or 1
                 case EventKind.Swap:
                     if (!r.TryReadUInt(out body.tick)) return false;
                     if (!r.TryReadBytes(ControlMap.PackedSize, out var sm)) return false;

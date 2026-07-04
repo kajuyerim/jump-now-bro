@@ -320,10 +320,66 @@ namespace JumpNowBro.Tests
         }
 
         [Test]
+        public void EventBody_LobbyReady_RoundTrip()
+        {
+            var buf = new byte[EventBody.MaxSize];
+            foreach (bool isReady in new[] { true, false })
+            {
+                int n = EventBody.LobbyReady(isReady).Write(buf);
+                Assert.AreEqual(2, n);                           // kind + ready flag
+                Assert.IsTrue(EventBody.TryRead(buf.AsSpan(0, n), out var rt));
+                Assert.AreEqual(EventKind.LobbyReady, rt.kind);
+                Assert.AreEqual(isReady ? 1 : 0, rt.ready);
+            }
+        }
+
+        [Test]
+        public void EventBody_LobbyReady_FlagOutOfRange_Rejected()
+        {
+            // A flag byte is strictly 0|1, matching the ControlMap owner-byte strictness.
+            Assert.IsFalse(EventBody.TryRead(new byte[] { (byte)EventKind.LobbyReady, 2 }, out _));
+        }
+
+        [Test]
+        public void EventBody_LobbyReadyTruncated_Rejected()
+        {
+            Assert.IsFalse(EventBody.TryRead(new byte[1] { (byte)EventKind.LobbyReady }, out _));
+        }
+
+        [Test]
+        public void EventBody_LobbyState_RoundTrip()
+        {
+            var buf = new byte[EventBody.MaxSize];
+            int n = EventBody.LobbyState(2).Write(buf);
+            Assert.AreEqual(2, n);                               // kind + selected level
+            Assert.IsTrue(EventBody.TryRead(buf.AsSpan(0, n), out var rt));
+            Assert.AreEqual(EventKind.LobbyState, rt.kind);
+            Assert.AreEqual(2, rt.sceneIndex);
+        }
+
+        [Test]
+        public void EventBody_LobbyStateTruncated_Rejected()
+        {
+            Assert.IsFalse(EventBody.TryRead(new byte[1] { (byte)EventKind.LobbyState }, out _));
+        }
+
+        [Test]
+        public void EventBody_MaxSize_StillBoundsAllVariants()
+        {
+            // Swap remains the largest variant; every other kind must fit the shared send scratch.
+            var buf = new byte[EventBody.MaxSize];
+            Assert.AreEqual(EventBody.MaxSize, EventBody.Swap(1u, ControlMap.Default, 1).Write(buf));
+            Assert.LessOrEqual(EventBody.LobbyReady(true).Write(buf), EventBody.MaxSize);
+            Assert.LessOrEqual(EventBody.LobbyState(0).Write(buf), EventBody.MaxSize);
+        }
+
+        [Test]
         public void EventBody_UnknownKind_Rejected()
         {
             // Kind = 99: outside the defined enum range.
             Assert.IsFalse(EventBody.TryRead(new byte[] { 99, 0 }, out _));
+            // And the exact boundary: one past the last defined kind (LobbyState = 5).
+            Assert.IsFalse(EventBody.TryRead(new byte[] { 6, 0 }, out _));
         }
 
         [Test]

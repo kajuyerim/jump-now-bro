@@ -64,6 +64,8 @@ flowchart TB
   EV --> ESW["Swap: apply_at_tick + absolute ControlMap + triggerId"]
   EV --> EDE["Death: checkpoint map (host to client)"]
   EV --> ELR["LevelReady (client to host, load-barrier ack)"]
+  EV --> ELB["LobbyReady: ready flag (client to host)"]
+  EV --> ELS["LobbyState: selected level (host to client)"]
 ```
 
 <sub>The strict unreliable/reliable split: `INPUT`/`STATE`/`PING`/`PONG` are lossy; `HELLO`/`WELCOME`/`GOODBYE` and the `EVENT` union are sequenced, acked, and retransmitted.</sub>
@@ -72,7 +74,10 @@ flowchart TB
 (each frame: bits for moveLeft/moveRight/jumpPressed/jumpHeld/dashPressed). `STATE` is 61 bytes:
 `snapshotTick` + `lastConsumedClientTick` + `deathCount` + `sceneIndex` + `ControlMap(3 B)` +
 `remoteInputFrame(1 B)` + a 46-byte `MovementState`. `EVENT` is a discriminated union keyed on
-`EventKind { LevelLoad, Swap, Death, LevelReady }`. The wire formats are **forward-compatible by
+`EventKind { LevelLoad, Swap, Death, LevelReady, LobbyReady, LobbyState }` (the lobby pair carries the
+pre-game ready-up: the client's 1-byte ready flag up, the host's 1-byte level pick down; their addition
+bumped the session protocol to **v3** so a pre-lobby peer fails the handshake loudly instead of hanging
+in a lobby it cannot see). The wire formats are **forward-compatible by
 reserve-and-tolerate**, `MovementState`'s trailing padding bytes and the input frame's reserved bits let a
 newer sender append fields an older reader silently ignores, so new facts go on the wire without a version
 bump. Every deserializer is bounds-checked and **returns `false` instead of throwing** on a short or
