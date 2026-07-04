@@ -33,6 +33,8 @@ namespace JumpNowBro.Networking
         /// Diagnostics for the connection panel (#91): reliable backlog + malformed-drop count.
         public int PendingReliableCount => transport != null ? transport.PendingReliableCount : 0;
         public int DroppedDatagrams => transport != null ? transport.DroppedDatagrams : 0;
+        /// #132: sustained-degradation flag with hysteresis (RTT + inbound loss); drives the menu's subtle indicator.
+        public bool ConnectionUnstable => quality != null && quality.Unstable;
         /// Connection-loss UX (#90): true while a peer-initiated drop is surfaced (sim paused, overlay up).
         public bool ConnectionLost => connectionLost;
         public bool SoloActive => soloActive;
@@ -47,6 +49,7 @@ namespace JumpNowBro.Networking
         DiscoveryService discovery;
         Session session;
         UdpReliableTransport transport;                                   // kept on the manager so #78 broadcasters/senders can read it via Instance.CurrentTransport
+        ConnectionQualityMonitor quality;                                 // #132: lifetime == transport's (fresh per transport, or deltas go negative on rejoin)
         bool listening;                // host is in the listen-for-HELLO phase
         bool connectionLost;           // #90: a peer drop is being surfaced (paused + overlay) until rejoin/menu
         bool soloActive;               // Solo (no-session single-player) is running — keeps the Leave button up
@@ -68,7 +71,7 @@ namespace JumpNowBro.Networking
         bool barrierArmed;
         int barrierScene;
         double barrierDeadline;
-        const double BarrierTimeoutSeconds = 2.0;   // < the ~3 s liveness teardown: a truly dead peer is handled there, not here
+        const double BarrierTimeoutSeconds = 2.0;   // < the 5 s liveness teardown: a truly dead peer is handled there, not here
 
         void Awake()
         {
@@ -114,6 +117,10 @@ namespace JumpNowBro.Networking
             if (Role == GameRole.Hosting && listening && gameplaySocket != null) PollForHello();
             condChannel?.Release(clock);
             session?.Tick(Time.deltaTime);                                // session pumps its transport internally — never tick transport directly
+            if (transport != null && quality != null)                     // #132: feed smoothed RTT + inbound loss counters.
+                // The EMA, not the raw sample: raw PONGs land at 1 Hz and HOLD between arrivals, so a 2 s
+                // sustain is really just two samples — jitter + sim frame-quantization then false-trips Fair.
+                quality.Tick(Time.deltaTime, transport.RttSeconds, transport.PacketsAccepted, transport.PacketsMissed);
             discovery?.Tick(clock);
             if (barrierArmed && clock >= barrierDeadline)                 // ack lost but link maybe alive: resume best-effort, let liveness own a real death
             {
@@ -200,6 +207,7 @@ namespace JumpNowBro.Networking
 #endif
             transport = new UdpReliableTransport(ch, pingIntervalSeconds: 0.2);      // ~5 Hz keepalive — v1.2's only traffic until #76's Established hook flips to 1 Hz
             transport.Logger = msg => Debug.LogWarning($"[net] {msg}");              // surface should-never-happen drops (oversized send)
+            quality = new ConnectionQualityMonitor();                                // #132: fresh monitor per transport (counter baselines line up)
             // Providers sampled at WELCOME-send time so currentSceneIndex reflects the actual scene
             // the host is on (mid-game join case); 0xFF sentinel means "no level loaded yet".
             session = new Session(transport, isHost: true,
@@ -231,6 +239,7 @@ namespace JumpNowBro.Networking
 #endif
             transport = new UdpReliableTransport(ch, pingIntervalSeconds: 0.2);
             transport.Logger = msg => Debug.LogWarning($"[net] {msg}");
+            quality = new ConnectionQualityMonitor();                     // #132: fresh monitor per transport
             session = new Session(transport, isHost: false,
                 localNameProvider: () => localPlayerName,
                 localColorProvider: () => localColorIndex);
@@ -451,6 +460,7 @@ namespace JumpNowBro.Networking
             ClearBarrier();                                              // don't stay frozen waiting for an ack from a peer that just left
             session = null;
             transport = null;
+            quality = null;
             condChannel = null;
 
             // A local Leave runs the full EndSessionFromUi teardown — nothing to pause or surface. A peer-initiated
@@ -589,6 +599,7 @@ namespace JumpNowBro.Networking
 
             session = null;
             transport = null;
+            quality = null;
             condChannel = null;
             discovery?.Dispose(); discovery = null;
             gameplaySocket?.Dispose(); gameplaySocket = null;

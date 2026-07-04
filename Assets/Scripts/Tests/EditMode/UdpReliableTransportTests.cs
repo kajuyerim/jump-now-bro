@@ -112,6 +112,48 @@ namespace JumpNowBro.Tests
             Assert.IsNotNull(logged);
         }
 
+        // #132 loss counters: a dropped datagram leaves a seq gap that books a miss on the next arrival.
+        [Test]
+        public void PacketCounters_GapAfterDrop_CountsMissed()
+        {
+            var (ca, cb) = InMemoryDatagramChannel.Pair();
+            var a = new UdpReliableTransport(ca);
+            var b = new UdpReliableTransport(cb);
+            Pump(a, b, 5);                                   // handshake-era PING/PONG; settle baselines
+            int accepted0 = b.PacketsAccepted;
+            int missed0 = b.PacketsMissed;
+
+            a.Send(Channel.Unreliable, MessageType.State, new byte[] { 1 });
+            ca.DropNextSends = 1;
+            a.Send(Channel.Unreliable, MessageType.State, new byte[] { 2 });   // lost on the wire
+            a.Send(Channel.Unreliable, MessageType.State, new byte[] { 3 });
+            b.Tick(0.016f);                                  // b drains its channel; no new a-side traffic
+
+            Assert.AreEqual(missed0 + 1, b.PacketsMissed, "the dropped datagram's gap books one miss");
+            Assert.AreEqual(accepted0 + 2, b.PacketsAccepted, "the two delivered datagrams count");
+        }
+
+        // #132: reordering is NOT loss — a late arrival that fills its gap repairs the miss.
+        [Test]
+        public void PacketCounters_LateArrival_RepairsMissed()
+        {
+            var (ca, cb) = InMemoryDatagramChannel.Pair();
+            var a = new UdpReliableTransport(ca);
+            var b = new UdpReliableTransport(cb);
+            Pump(a, b, 5);
+            int accepted0 = b.PacketsAccepted;
+            int missed0 = b.PacketsMissed;
+
+            cb.Lifo = true;                                  // b drains newest-first: 3, 2, 1
+            a.Send(Channel.Unreliable, MessageType.State, new byte[] { 1 });
+            a.Send(Channel.Unreliable, MessageType.State, new byte[] { 2 });
+            a.Send(Channel.Unreliable, MessageType.State, new byte[] { 3 });
+            b.Tick(0.016f);                                  // processes all three in one drain
+
+            Assert.AreEqual(missed0, b.PacketsMissed, "both late arrivals repair their booked misses");
+            Assert.AreEqual(accepted0 + 3, b.PacketsAccepted, "all three datagrams arrived and count once each");
+        }
+
         [Test]
         public void Fuzz_RandomDatagrams_NeverThrow()
         {

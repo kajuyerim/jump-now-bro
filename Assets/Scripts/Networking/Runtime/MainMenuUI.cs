@@ -20,7 +20,7 @@ namespace JumpNowBro.Networking
         NetworkManager net;
         GameObject menu, leaveBar, lostOverlay;
         TMP_InputField ipField, lobbyField, nameField;
-        TMP_Text lostTitle, lostMsg, lostWaitLabel, pingLabel, statusBanner;
+        TMP_Text lostTitle, lostMsg, lostWaitLabel, pingLabel, statusBanner, unstableLabel;
         Button lostRejoinBtn;
         float nextPingRefresh;
         readonly Button[] levelButtons = new Button[3];
@@ -55,6 +55,12 @@ namespace JumpNowBro.Networking
                                 : ms < 120 ? new Color(1f, 0.82f, 0.35f)
                                 :            new Color(1f, 0.5f, 0.4f);
             }
+
+            // #132: sustained degradation (hysteresis lives in the monitor). Established gate keeps it off
+            // while a host is merely listening (no peer, no data).
+            bool showUnstable = showPing && net.CurrentSessionState == Session.SessionState.Established
+                                         && net.ConnectionUnstable;
+            if (unstableLabel.gameObject.activeSelf != showUnstable) unstableLabel.gameObject.SetActive(showUnstable);
 
             // Pre-game status while no level is up: the client is dialing the host (it re-probes for ~15 s, #120),
             // or the host is listening for a peer. Keeps the blank pre-session screen from reading as a hang.
@@ -186,6 +192,17 @@ namespace JumpNowBro.Networking
             prt.sizeDelta = new Vector2(170f, 26f);
             pingLabel.alignment = TextAlignmentOptions.Left;
             pingLabel.gameObject.SetActive(false);
+
+            // #132: "Connection unstable" warning under the ping readout; shown only while the quality
+            // monitor's hysteresis says the link is degraded, so it never nags on a healthy LAN.
+            unstableLabel = Label(canvasGo.transform, "Connection unstable", 15, FontStyles.Bold);
+            var urt = unstableLabel.rectTransform;
+            urt.anchorMin = urt.anchorMax = urt.pivot = new Vector2(0f, 1f);
+            urt.anchoredPosition = new Vector2(18f, -124f);
+            urt.sizeDelta = new Vector2(200f, 22f);
+            unstableLabel.alignment = TextAlignmentOptions.Left;
+            unstableLabel.color = new Color(1f, 0.82f, 0.35f);
+            unstableLabel.gameObject.SetActive(false);
 
             // Pre-game status banner, centered, over the empty pre-session screen (host listening / client dialing).
             statusBanner = Label(canvasGo.transform, "", 30, FontStyles.Bold);

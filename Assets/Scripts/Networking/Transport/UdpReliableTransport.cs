@@ -24,6 +24,9 @@ namespace JumpNowBro.Networking
 
         ushort nextPacketSeq = 1;                      // 0 reserved; stamps every datagram, drives unreliable latest-wins
         ushort highestPacketSeq;                       // 0 = none seen yet
+        uint seenPacketBits;                           // bit n = received (highestPacketSeq - 1 - n); loss-vs-reorder discriminator (#132)
+        int packetsAccepted;                           // inbound datagrams counted once each (newest or late-but-new)
+        int packetsMissed;                             // cumulative seq gaps, repaired when a late arrival proves reorder not loss
         double clock;                                   // seconds since construction; advanced by Tick
         double lastPingAt = double.NegativeInfinity;
         double lastReceivedAt;                          // clock of the last inbound datagram (liveness baseline)
@@ -41,6 +44,9 @@ namespace JumpNowBro.Networking
         }
 
         public float RttSeconds => rtt.RttSeconds;
+        public float LastRttSampleSeconds => rtt.LastSampleSeconds;  // raw, for the quality monitor (#132)
+        public int PacketsAccepted => packetsAccepted;               // quality-monitor loss inputs (#132)
+        public int PacketsMissed => packetsMissed;
         public bool Connected => connected;
         public int PendingReliableCount => sendQueue.PendingCount;   // for tests/diagnostics; not on the interface
         public int DroppedDatagrams => droppedDatagrams;             // malformed/unknown inbound dropped (diagnostic)
@@ -127,8 +133,36 @@ namespace JumpNowBro.Networking
 
             // Packet-seq latest-wins bookkeeping. (DESIGN §7 gates on the packet seq; the precise per-message
             // tick gate lands with the INPUT/STATE payload formats in v1.4.)
+            // Also feeds the quality monitor's loss counters (#132), mirroring AckSystem.OnReceived: a newest
+            // packet books its seq gap as missed; a stale packet that flips a previously-unseen history bit
+            // repairs one miss (it was reordered, not lost); duplicates change nothing. Loss here is an
+            // inbound-only proxy: each end reports what IT failed to receive.
             bool newestPacket = highestPacketSeq == 0 || SeqMath.IsNewer(h.seq, highestPacketSeq);
-            if (newestPacket) highestPacketSeq = h.seq;
+            if (newestPacket)
+            {
+                if (highestPacketSeq != 0)                    // first-ever inbound seeds the baseline, no misses booked
+                {
+                    int gap = SeqMath.Delta(h.seq, highestPacketSeq);
+                    packetsMissed += gap - 1;
+                    seenPacketBits = gap >= 32 ? 0u : (seenPacketBits << gap) | (1u << (gap - 1));
+                }
+                packetsAccepted++;
+                highestPacketSeq = h.seq;
+            }
+            else
+            {
+                int back = SeqMath.Delta(highestPacketSeq, h.seq);
+                if (back >= 1 && back <= 32)
+                {
+                    uint bit = 1u << (back - 1);
+                    if ((seenPacketBits & bit) == 0)          // late but new: repair; already-set = duplicate, no-op
+                    {
+                        seenPacketBits |= bit;
+                        packetsAccepted++;
+                        if (packetsMissed > 0) packetsMissed--;
+                    }
+                }
+            }
 
             int offset = PacketHeader.Size;
             bool reliable = IsReliable(h.type);
