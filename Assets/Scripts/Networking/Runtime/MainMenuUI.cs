@@ -152,6 +152,7 @@ namespace JumpNowBro.Networking
             var hlf = hostList.GetComponent<ContentSizeFitter>();
             hlf.horizontalFit = hlf.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
 
+            MakeButton(col.transform, "Settings", 330, 46, () => SettingsPanel.Instance?.Open());
             MakeButton(col.transform, "Quit", 330, 46, () => Application.Quit());
 
 #if UNITY_EDITOR

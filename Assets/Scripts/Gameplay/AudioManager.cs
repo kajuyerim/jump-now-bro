@@ -1,6 +1,5 @@
 using UnityEngine;
 using UnityEngine.Audio;
-using UnityEngine.InputSystem;
 
 namespace JumpNowBro.Gameplay
 {
@@ -79,24 +78,24 @@ namespace JumpNowBro.Gameplay
             if (musicClip != null) { music.clip = musicClip; music.Play(); }
         }
 
-        // Seed the mixer levels in Start, not Awake: AudioMixer.SetFloat on exposed params can be silently
-        // overwritten by the startup snapshot transition on frame 1 if set in Awake.
+        // Apply audio levels in Start, not Awake: AudioMixer.SetFloat on exposed params can be silently
+        // overwritten by the startup snapshot transition on frame 1 if set in Awake. Saved settings (#128) win;
+        // with nothing saved, the serialized defaults reproduce the pre-settings behaviour.
         void Start()
         {
-            if (!HasMixer) return;
-            ApplyMasterToMixer();
-            ApplyMusicToMixer();
-            ApplySFXToMixer();
+            if (GameSettings.HasAudioPrefs)
+            {
+                GameSettings.ApplyAudio(this);
+            }
+            else
+            {
+                ApplyMasterToMixer();
+                ApplyMusicToMixer();
+                ApplySFXToMixer();
+            }
         }
 
-        // Interim mute affordance (#116 wants "at least a way to mute it"); #128's settings panel adds a UI toggle.
-        // Master mute now silences everything (was music-only), which is what the settings mute will surface.
-        void Update()
-        {
-            if (Keyboard.current != null && Keyboard.current.mKey.wasPressedThisFrame) ToggleMuted();
-        }
-
-        // ---- volume API (#128 drives these; 0..1) ----
+        // ---- volume API (#128's settings panel drives these; 0..1) ----
 
         public void SetMasterVolume(float v01) { masterVolume = Mathf.Clamp01(v01); ApplyMasterToMixer(); }
         public void SetMusicVolume(float v01)  { musicVolume  = Mathf.Clamp01(v01); ApplyMusicToMixer(); }
