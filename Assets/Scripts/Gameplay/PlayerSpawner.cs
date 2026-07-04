@@ -23,6 +23,11 @@ namespace JumpNowBro.Gameplay
         // Player is re-instantiated per level, so its DeathCount is per-level; this
         // folds finished levels into a running total for the completion summary.
         public int TotalDeaths => accumulatedDeaths + (currentPlayer != null ? currentPlayer.DeathCount : 0);
+
+        /// Zero the folded total between sessions. Without this the accumulator leaked across Leave/re-Host:
+        /// DeathNotifier.Reset blanked the HUD, but the FIRST death of the next session raised
+        /// Raise(TotalDeaths) with the previous run's deaths still folded in, jumping the counter.
+        public void ResetDeathAccumulation() => accumulatedDeaths = 0;
         /// Fires with the spawned Player GameObject — subscribers TryGetComponent for PlayerController
         /// when they need it. The v1.4 client destroys PlayerController, so the previous Action<PlayerController>
         /// signature would have fired with null and NRE'd downstream subscribers.

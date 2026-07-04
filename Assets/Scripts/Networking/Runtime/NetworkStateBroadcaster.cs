@@ -67,8 +67,12 @@ namespace JumpNowBro.Networking
                 // Cumulative across level transitions — client mirrors this via DeathNotifier.Raise so its
                 // HUD lines up with the host's TotalDeaths instead of a per-level controller.DeathCount.
                 deathCount             = (ushort)(PlayerSpawner.Instance != null ? PlayerSpawner.Instance.TotalDeaths : 0),
-                sceneIndex             = (byte)(levelManager != null && levelManager.CurrentLevelIndex >= 0 && levelManager.CurrentLevelIndex < 0xFF
-                                                ? levelManager.CurrentLevelIndex : 0xFF),
+                // Post-victory the index sits at LevelCount (out of range): map it to the 0xFE sentinel like
+                // the WELCOME provider does, not a raw invalid index. No consumer reads STATE.sceneIndex
+                // today, kept consistent so a future reader can't inherit the (#143) out-of-range bug.
+                sceneIndex             = (byte)(levelManager == null || levelManager.CurrentLevelIndex < 0 ? 0xFF
+                                                : levelManager.CurrentLevelIndex >= levelManager.LevelCount ? LevelManager.AllLevelsCompleteSentinel
+                                                : levelManager.CurrentLevelIndex),
                 controlMap             = store != null ? store.Current : ControlMap.Default,
                 remoteInputFrame       = controller != null ? controller.LastHostInputFrame : default,
                 movementState          = state,

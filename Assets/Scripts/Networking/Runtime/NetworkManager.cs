@@ -35,6 +35,21 @@ namespace JumpNowBro.Networking
         public int DroppedDatagrams => transport != null ? transport.DroppedDatagrams : 0;
         /// #132: sustained-degradation flag with hysteresis (RTT + inbound loss); drives the menu's subtle indicator.
         public bool ConnectionUnstable => quality != null && quality.Unstable;
+
+        // ---- v2.3 lobby surface (#143) ----
+        /// Pre-game staging state: LobbyUI shows while true. Host: from hosting start (session may still be
+        /// null while listening). Client: only once Established (Connecting keeps the dial-status UI). Never
+        /// in solo, never mid-level (CurrentLevelIndex >= 0), never under the connection-lost overlay.
+        public bool InLobby =>
+            !connectionLost
+            && LevelManager.Instance != null && LevelManager.Instance.CurrentLevelIndex < 0
+            && (Role == GameRole.Hosting
+                || (Role == GameRole.Client && CurrentSessionState == Session.SessionState.Established
+                    && !clientJoinedPostVictory));
+        public bool PeerConnected => CurrentSessionState == Session.SessionState.Established;
+        public bool PeerReady => peerReady;          // host's view of the client's ready toggle
+        public bool LocalReady => localReady;        // the client's own toggle
+        public int LobbySelectedLevel => lobbySelectedLevel;
         /// Connection-loss UX (#90): true while a peer-initiated drop is surfaced (sim paused, overlay up).
         public bool ConnectionLost => connectionLost;
         public bool SoloActive => soloActive;
@@ -53,7 +68,11 @@ namespace JumpNowBro.Networking
         bool listening;                // host is in the listen-for-HELLO phase
         bool connectionLost;           // #90: a peer drop is being surfaced (paused + overlay) until rejoin/menu
         bool soloActive;               // Solo (no-session single-player) is running — keeps the Leave button up
-        int lastHostedLevelIndex = -1; // #104: a host Leave remembers its level so the next Host resumes it
+        int lastHostedLevelIndex = -1; // #104: a host Leave remembers its level so the next Host resumes it (v2.3: as a lobby preselect)
+        int lobbySelectedLevel;        // v2.3: the host's lobby level pick; mirrored to the client via LobbyState
+        bool peerReady;                // v2.3: host-side, the client's LobbyReady flag
+        bool localReady;               // v2.3: client-side, its own Ready toggle
+        bool clientJoinedPostVictory;  // v2.3: WELCOME carried the all-complete sentinel — show CompleteScreen, not the lobby
         Session.DisconnectReason lostReason;
         string localPlayerName = "";   // #114: this player's display name from the menu (stamped into HELLO/WELCOME)
         byte localColorIndex;          // #125: assigned colour slot — host = 0, client = 1
@@ -193,7 +212,8 @@ namespace JumpNowBro.Networking
             while (gameplaySocket.Poll(out var data, out var from))
             {
                 if (SessionProtocol.IsValidHello(data)) { LatchPeer(from, data); return; }
-                // not a valid HELLO (junk / wrong magic / wrong version): drop and keep draining
+                RejectWrongVersionHello(data, from);
+                // otherwise not a valid HELLO (junk / wrong magic): drop and keep draining
             }
         }
 
@@ -212,8 +232,11 @@ namespace JumpNowBro.Networking
             // the host is on (mid-game join case); 0xFF sentinel means "no level loaded yet".
             session = new Session(transport, isHost: true,
                 sceneIndexProvider: () => {
-                    var idx = LevelManager.Instance != null ? LevelManager.Instance.CurrentLevelIndex : -1;
-                    return idx >= 0 && idx < 0xFF ? (byte)idx : (byte)0xFF;
+                    var lmp = LevelManager.Instance;
+                    int idx = lmp != null ? lmp.CurrentLevelIndex : -1;
+                    if (idx < 0) return (byte)0xFF;                                  // pre-load: client waits (lobby)
+                    if (idx >= lmp.LevelCount) return LevelManager.AllLevelsCompleteSentinel;   // post-victory join
+                    return (byte)idx;                                                // was raw out-of-range post-victory: client LoadByIndex errored to a blank screen
                 },
                 hostTickProvider: () => TickClock.Instance != null ? TickClock.Instance.Current : 0u,
                 localNameProvider: () => localPlayerName,
@@ -223,6 +246,31 @@ namespace JumpNowBro.Networking
             session.OnHelloReceived += OnHostHelloReceived;               // learn the client's name/colour for the HUD
             session.Start();                                              // queues WELCOME; flushes on the next session.Tick
             listening = false;
+        }
+
+        // A stale-build peer's HELLO (right magic, wrong version) would otherwise be dropped silently here and
+        // read as a network failure after the client's 15 s dial-out. One raw not-accepted WELCOME makes the
+        // version skew fail fast and loud instead (#142 bumped the protocol to v3 for the lobby kinds).
+        void RejectWrongVersionHello(byte[] datagram, IPEndPoint from)
+        {
+            if (!PacketHeader.TryRead(datagram, out var h) || h.type != MessageType.Hello) return;
+            int bodyOffset = PacketHeader.Size + 2;                       // header + reliable message-seq
+            if (datagram.Length < bodyOffset) return;
+            if (!Hello.TryRead(new ReadOnlySpan<byte>(datagram, bodyOffset, datagram.Length - bodyOffset), out var hello)) return;
+            if (hello.Magic != SessionProtocol.Magic || hello.Version == SessionProtocol.Version) return;
+
+            var welcome = new Welcome
+            {
+                Magic = SessionProtocol.Magic, Version = SessionProtocol.Version,
+                Accepted = false, Reason = WelcomeReason.VersionMismatch,
+                PeerOwner = JumpNowBro.Util.InputOwner.P2, CurrentSceneIndex = 0xFF, Name = "",
+            };
+            var buf = new byte[128];
+            new PacketHeader { type = MessageType.Welcome, seq = 1, ack = 0, ackBits = 0, timestamp = 0 }.Write(buf);
+            int off = PacketHeader.Size;
+            buf[off++] = 0; buf[off++] = 1;                               // message-seq 1: the peer's fresh receive buffer delivers it first
+            int n = welcome.Write(new Span<byte>(buf, off, buf.Length - off));
+            gameplaySocket.Send(new ReadOnlySpan<byte>(buf, 0, off + n), from);
         }
 
         // ---- client lifecycle ----
@@ -381,12 +429,26 @@ namespace JumpNowBro.Networking
                         ControlMapStore.Instance?.Apply(ev.map);
                         SwapTrigger.ReconcileBannersTo(ev.map);   // #111: re-arm post-checkpoint banners on the client
                         break;
+                    case EventKind.LobbyState:
+                        lobbySelectedLevel = ev.sceneIndex;       // v2.3: the host's level pick, shown in the client's lobby
+                        break;
                 }
             }
-            else if (Role == GameRole.Hosting && ev.kind == EventKind.LevelReady)
+            else if (Role == GameRole.Hosting)
             {
-                // Scene-matched so a stale ack for a previous load can't unfreeze us into the wrong scene.
-                if (barrierArmed && ev.sceneIndex == barrierScene) ClearBarrier();
+                switch (ev.kind)
+                {
+                    case EventKind.LevelReady:
+                        // Scene-matched so a stale ack for a previous load can't unfreeze us into the wrong scene.
+                        if (barrierArmed && ev.sceneIndex == barrierScene) ClearBarrier();
+                        break;
+                    case EventKind.LobbyReady:
+                        // Honored only pre-game: StartGameFromLobby's LoadByIndex sets the index synchronously,
+                        // so a late un-ready can't stop a load that already started (LevelLoad is authoritative).
+                        if (LevelManager.Instance != null && LevelManager.Instance.CurrentLevelIndex < 0)
+                            peerReady = ev.ready == 1;
+                        break;
+                }
             }
         }
 
@@ -419,6 +481,63 @@ namespace JumpNowBro.Networking
             if (LevelManager.Instance != null) LevelManager.Instance.SimPaused = false;
         }
 
+        // EndSession-lite for a mid-game partner Leave: tear the run down (player, HUD, death totals) but
+        // keep the socket + listening so the host lands back in its lobby, current level preselected, ready
+        // for the next partner. The stale level scene stays loaded behind the opaque lobby; the next Start
+        // unload-then-loads through the existing LoadLevelRoutine handoff (same pattern as EndSessionFromUi).
+        void ReturnHostToLobby()
+        {
+            var lm = LevelManager.Instance;
+            if (lm != null)
+                lobbySelectedLevel = Mathf.Clamp(lm.CurrentLevelIndex, 0, Mathf.Max(0, lm.LevelCount - 1));
+            if (PlayerSpawner.Instance != null && PlayerSpawner.Instance.CurrentPlayerInstance != null)
+                Destroy(PlayerSpawner.Instance.CurrentPlayerInstance);
+            currentHostRemote = null;
+            lm?.ResetIndex();                                            // index < 0 -> InLobby true, lobby shows
+            if (lm != null) lm.SimPaused = false;
+            CompleteScreen.Instance?.HidePanel();
+            FindAnyObjectByType<LevelHud>()?.Clear();
+            DeathNotifier.Instance?.Reset();
+            PlayerSpawner.Instance?.ResetDeathAccumulation();
+            GhostIntentSources.Reset();
+        }
+
+        // ---- v2.3 lobby actions (#143) ----
+
+        /// Host: pick the level the lobby will start. Clamped; mirrored to the client via LobbyState.
+        public void SetLobbyLevel(int index)
+        {
+            if (Role != GameRole.Hosting) return;
+            var lm = LevelManager.Instance;
+            lobbySelectedLevel = Mathf.Clamp(index, 0, lm != null ? Mathf.Max(0, lm.LevelCount - 1) : 0);
+            SendLobbyState();
+        }
+
+        void SendLobbyState()
+        {
+            if (Role != GameRole.Hosting || transport == null) return;   // pre-peer: stored locally, sent on Established
+            int n = EventBody.LobbyState((byte)lobbySelectedLevel).Write(eventSendScratch);
+            transport.Send(Channel.Reliable, MessageType.Event, new ReadOnlySpan<byte>(eventSendScratch, 0, n));
+        }
+
+        /// Client: toggle the pre-game Ready flag (reliable, so the host's Start gate can't miss it).
+        public void SetLobbyReady(bool ready)
+        {
+            if (Role != GameRole.Client || transport == null || !PeerConnected) return;
+            localReady = ready;
+            int n = EventBody.LobbyReady(ready).Write(eventSendScratch);
+            transport.Send(Channel.Reliable, MessageType.Event, new ReadOnlySpan<byte>(eventSendScratch, 0, n));
+        }
+
+        /// Host: start the picked level. Requires a connected, ready client; drives the EXISTING
+        /// LoadByIndex path (LevelLoad EVENT + SimPaused barrier + client LevelReady ack, all unchanged).
+        public void StartGameFromLobby()
+        {
+            if (Role != GameRole.Hosting || !PeerConnected || !peerReady) return;
+            peerReady = false; localReady = false;
+            LevelManager.Instance?.LoadByIndex(lobbySelectedLevel);
+        }
+
         /// Host: send a scheduled control swap on the reliable channel. apply_at_tick is a client input-tick so
         /// both ends flip ControlMapStore at the same point in the input stream. No-op off the host.
         public void SendSwapEvent(uint applyTick, ControlMap map, byte triggerId)
@@ -447,11 +566,14 @@ namespace JumpNowBro.Networking
                 connectionLost = false;                                   // (re)connected — clear any prior loss overlay + resume the sim
                 if (LevelManager.Instance != null) LevelManager.Instance.SimPaused = false;
                 transport?.SetPingInterval(1.0);                          // INPUT/STATE keep liveness warm — restore DESIGN §8 PING cadence
+                peerReady = false; localReady = false;                    // v2.3: a fresh (or re-established) session starts un-ready
                 if (Role == GameRole.Hosting && LevelManager.Instance != null && LevelManager.Instance.CurrentLevelIndex < 0)
                 {
-                    // Resume the level a previous Leave remembered (#104); otherwise start the game at Level_01.
-                    if (lastHostedLevelIndex >= 0) { LevelManager.Instance.LoadByIndex(lastHostedLevelIndex); lastHostedLevelIndex = -1; }
-                    else LevelManager.Instance.LoadByIndex(LevelManager.Instance.PendingStartIndex);   // start at the menu's pick
+                    // v2.3: hold in the lobby instead of the old auto-load; the game starts via
+                    // StartGameFromLobby once the client readies (#104's resume became the lobby preselect,
+                    // seeded in BeginHostingFromUi). Rejoin into a running game is untouched: index >= 0
+                    // skips this and the WELCOME carried the live scene.
+                    SendLobbyState();
                 }
             }
             if (state != Session.SessionState.Disconnected) return;
@@ -462,13 +584,26 @@ namespace JumpNowBro.Networking
             transport = null;
             quality = null;
             condChannel = null;
+            peerReady = false; localReady = false;                       // v2.3: a departed peer is not ready
 
             // A local Leave runs the full EndSessionFromUi teardown — nothing to pause or surface. A peer-initiated
             // drop (their GOODBYE / timeout / exhaustion), or a client that can't reach the host, pauses + surfaces
             // so the session stays resumable: the host keeps its level/pose/score and listens; the client can Rejoin.
             // (A host that merely rejected a bad HELLO just keeps listening silently.)
+            // v2.3: a HOST losing its peer PRE-GAME doesn't surface the heavy "partner disconnected" overlay —
+            // the lobby simply reverts to its waiting card while listening resumes below. The CLIENT still
+            // surfaces (there is a host to Retry against).
+            bool hostInLobby = Role == GameRole.Hosting && LevelManager.Instance != null
+                               && LevelManager.Instance.CurrentLevelIndex < 0;
+            // A partner who deliberately LEAVES mid-game (GOODBYE -> PeerLeft) returns the host to the lobby
+            // with the current level preselected; a crash/timeout (ConnectionLost) keeps the overlay because
+            // that path preserves the exact in-level state for a rejoin-resume.
+            bool hostBackToLobby = Role == GameRole.Hosting && reason == Session.DisconnectReason.PeerLeft
+                                   && LevelManager.Instance != null && LevelManager.Instance.CurrentLevelIndex >= 0;
+            if (hostBackToLobby) ReturnHostToLobby();
             bool surface = reason != Session.DisconnectReason.LocalLeave
-                           && !(Role == GameRole.Hosting && reason == Session.DisconnectReason.HandshakeFailed);
+                           && !(Role == GameRole.Hosting && reason == Session.DisconnectReason.HandshakeFailed)
+                           && !hostInLobby && !hostBackToLobby;
             if (surface)
             {
                 connectionLost = true;
@@ -490,8 +625,12 @@ namespace JumpNowBro.Networking
             // Identity: the client is P2; the host (P1) just told us its name/colour in the WELCOME (#114, #125).
             PlayerIdentity.Set(InputOwner.P1, w.Name, w.ColorIndex);
             PlayerIdentity.Set(InputOwner.P2, localPlayerName, localColorIndex);
-            // currentSceneIndex == 0xFF means host hasn't loaded yet; LoadByIndex is a no-op in that case.
-            // The LEVEL_LOAD EVENT path (lands in #78) drives the initial-join client scene load.
+            // Joining a finished game (0xFE): LoadByIndex fires the CompleteScreen but never sets the level
+            // index, which would leave InLobby true and the lobby covering the victory screen — flag it so
+            // InLobby stays false. Self-clearing: any later WELCOME (rejoin) overwrites it.
+            clientJoinedPostVictory = w.CurrentSceneIndex == LevelManager.AllLevelsCompleteSentinel;
+            // currentSceneIndex == 0xFF means host hasn't loaded yet; LoadByIndex is a no-op in that case
+            // (the client sits in the lobby until the host's Start sends LEVEL_LOAD).
             LevelManager.Instance?.LoadByIndex(w.CurrentSceneIndex);
         }
 
@@ -520,6 +659,17 @@ namespace JumpNowBro.Networking
             if (!string.IsNullOrWhiteSpace(lobbyName)) gameName = lobbyName.Trim();   // beacon display name for LAN discovery
             localPlayerName = playerName ?? "";   // host's in-game display name (#114)
             localColorIndex = 0;                  // host = slot 0 (#125)
+
+            // v2.3: the lobby PRESELECTS the remembered level (a re-host resumes with one Start click; an
+            // auto-load would skip the ready handshake — deliberate change to #104's behavior), else the
+            // menu's pick. Clamped: a stale post-victory index must not leak in as out-of-range.
+            var lm = LevelManager.Instance;
+            int seed = lastHostedLevelIndex >= 0 ? lastHostedLevelIndex
+                     : lm != null ? lm.PendingStartIndex : 0;
+            lobbySelectedLevel = Mathf.Clamp(seed, 0, lm != null ? Mathf.Max(0, lm.LevelCount - 1) : 0);
+            lastHostedLevelIndex = -1;
+            peerReady = localReady = false;
+
             Role = GameRole.Hosting;
             Application.runInBackground = true;
             try { BeginHosting(); }
@@ -574,10 +724,16 @@ namespace JumpNowBro.Networking
             currentHostRemote = null;
             currentClientRenderer = null;
 
-            // Remember the host's current level so a Leave-then-Host resumes it instead of restarting at Level_01
-            // (#104). ResetIndex below clears CurrentLevelIndex, so capture first; a fresh Solo/Join clears it again.
-            if (Role == GameRole.Hosting && LevelManager.Instance != null && LevelManager.Instance.CurrentLevelIndex >= 0)
+            // Remember the host's current level so a Leave-then-Host resumes it (as the lobby preselect since
+            // v2.3). ResetIndex below clears CurrentLevelIndex, so capture first; a fresh Solo/Join clears it
+            // again. The < LevelCount guard keeps the post-victory index (== LevelCount) from leaking in: it
+            // made the next re-host LoadByIndex(out-of-range) and error into a levelless session.
+            if (Role == GameRole.Hosting && LevelManager.Instance != null
+                && LevelManager.Instance.CurrentLevelIndex >= 0
+                && LevelManager.Instance.CurrentLevelIndex < LevelManager.Instance.LevelCount)
                 lastHostedLevelIndex = LevelManager.Instance.CurrentLevelIndex;
+            peerReady = false; localReady = false;                       // v2.3: leaving abandons any ready state
+            clientJoinedPostVictory = false;
 
             // Reset LevelManager's index so the next Solo/Host/Join isn't tricked into a no-op by
             // LoadByIndex's idempotence check (which keys on currentLevelIndex + currentlyLoadedScene).
@@ -594,6 +750,7 @@ namespace JumpNowBro.Networking
             CompleteScreen.Instance?.HidePanel();
             FindAnyObjectByType<LevelHud>()?.Clear();
             DeathNotifier.Instance?.Reset();
+            PlayerSpawner.Instance?.ResetDeathAccumulation();                  // the folded total leaked across sessions otherwise
             PlayerIdentity.Reset();                                            // next session starts from the P1/P2 defaults
             GhostIntentSources.Reset();                                        // drop intent sources closing over the destroyed player (#124)
 
