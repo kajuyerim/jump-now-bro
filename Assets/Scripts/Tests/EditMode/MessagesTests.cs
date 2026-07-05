@@ -296,7 +296,7 @@ namespace JumpNowBro.Tests
             var map = ControlMap.WithSwap(ControlMap.Default, PlayerAction.Dash);
             var buf = new byte[EventBody.MaxSize];
             int n = EventBody.Swap(applyTick: 1_234_567u, map, triggerId: 5).Write(buf);
-            Assert.AreEqual(EventBody.MaxSize, n);              // Swap is the largest variant
+            Assert.AreEqual(1 + 4 + ControlMap.PackedSize + 1, n);   // kind + applyTick + map + triggerId
             Assert.IsTrue(EventBody.TryRead(buf.AsSpan(0, n), out var rt));
             Assert.AreEqual(EventKind.Swap, rt.kind);
             Assert.AreEqual(1_234_567u, rt.tick);
@@ -366,9 +366,11 @@ namespace JumpNowBro.Tests
         [Test]
         public void EventBody_MaxSize_StillBoundsAllVariants()
         {
-            // Swap remains the largest variant; every other kind must fit the shared send scratch.
+            // RunSummary is the largest variant; every other kind must fit the shared send scratch.
             var buf = new byte[EventBody.MaxSize];
-            Assert.AreEqual(EventBody.MaxSize, EventBody.Swap(1u, ControlMap.Default, 1).Write(buf));
+            Assert.AreEqual(EventBody.MaxSize, EventBody.RunSummary(0, default).Write(buf));
+            Assert.LessOrEqual(EventBody.Swap(1u, ControlMap.Default, 1).Write(buf), EventBody.MaxSize);
+            Assert.LessOrEqual(EventBody.Death(1u, ControlMap.Default).Write(buf), EventBody.MaxSize);
             Assert.LessOrEqual(EventBody.LobbyReady(true).Write(buf), EventBody.MaxSize);
             Assert.LessOrEqual(EventBody.LobbyState(0).Write(buf), EventBody.MaxSize);
         }
@@ -378,8 +380,46 @@ namespace JumpNowBro.Tests
         {
             // Kind = 99: outside the defined enum range.
             Assert.IsFalse(EventBody.TryRead(new byte[] { 99, 0 }, out _));
-            // And the exact boundary: one past the last defined kind (LobbyState = 5).
-            Assert.IsFalse(EventBody.TryRead(new byte[] { 6, 0 }, out _));
+            // And the exact boundary: one past the last defined kind (RunSummary = 6).
+            Assert.IsFalse(EventBody.TryRead(new byte[] { 7, 0 }, out _));
+        }
+
+        [Test]
+        public void EventBody_RunSummary_RoundTrip()
+        {
+            var stats = new LevelRunStats { timeMs = 83_450, deaths = 3, swaps = 7, streakMs = 41_200 };
+            var buf = new byte[EventBody.MaxSize];
+            int n = EventBody.RunSummary(2, stats).Write(buf);
+            Assert.AreEqual(EventBody.MaxSize, n);               // RunSummary is the largest variant
+            Assert.IsTrue(EventBody.TryRead(buf.AsSpan(0, n), out var rt));
+            Assert.AreEqual(EventKind.RunSummary, rt.kind);
+            Assert.AreEqual(2, rt.sceneIndex);
+            Assert.AreEqual(83_450u, rt.timeMs);
+            Assert.AreEqual(3, rt.deaths);
+            Assert.AreEqual(7, rt.swaps);
+            Assert.AreEqual(41_200u, rt.streakMs);
+        }
+
+        [Test]
+        public void EventBody_RunSummaryTruncated_Rejected()
+        {
+            var buf = new byte[EventBody.MaxSize];
+            int n = EventBody.RunSummary(1, new LevelRunStats { timeMs = 1000 }).Write(buf);
+            Assert.IsFalse(EventBody.TryRead(buf.AsSpan(0, n - 1), out _));   // 13 of 14 bytes
+        }
+
+        [Test]
+        public void EventBody_RunSummary_ClampsAtWireBoundary()
+        {
+            // Tracker stats are ints; the body is u16/u32. Negatives floor at 0, counts cap at u16 max.
+            var stats = new LevelRunStats { timeMs = -5, deaths = 70_000, swaps = -1, streakMs = -5 };
+            var buf = new byte[EventBody.MaxSize];
+            EventBody.RunSummary(0, stats).Write(buf);
+            Assert.IsTrue(EventBody.TryRead(buf, out var rt));
+            Assert.AreEqual(0u, rt.timeMs);
+            Assert.AreEqual(ushort.MaxValue, rt.deaths);
+            Assert.AreEqual(0, rt.swaps);
+            Assert.AreEqual(0u, rt.streakMs);
         }
 
         [Test]

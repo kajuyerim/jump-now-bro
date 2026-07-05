@@ -87,8 +87,8 @@ namespace JumpNowBro.Networking
         }
     }
 
-    /// EVENT.kind discriminator. LevelLoad/Swap/Death/LobbyState flow host → client; LevelReady (the
-    /// load-barrier ack) and LobbyReady (the pre-game ready toggle) flow client → host. The body shape
+    /// EVENT.kind discriminator. LevelLoad/Swap/Death/LobbyState/RunSummary flow host → client; LevelReady
+    /// (the load-barrier ack) and LobbyReady (the pre-game ready toggle) flow client → host. The body shape
     /// differs per kind — see EventBody.
     public enum EventKind : byte
     {
@@ -98,6 +98,7 @@ namespace JumpNowBro.Networking
         LevelReady = 3,
         LobbyReady = 4,    // client → host: 1-byte ready flag (v2.3 lobby)
         LobbyState = 5,    // host → client: 1-byte selected level, so the client's lobby shows the pick
+        RunSummary = 6,    // host → client: the completed level's run stats, sent at goal touch (#130)
     }
 
     /// EVENT body (reliable channel). A discriminated union keyed on `kind`; each variant validates its own
@@ -107,14 +108,18 @@ namespace JumpNowBro.Networking
     public struct EventBody
     {
         public EventKind kind;
-        public byte sceneIndex;     // LevelLoad / LevelReady / LobbyState (the host's selected level)
+        public byte sceneIndex;     // LevelLoad / LevelReady / LobbyState (selected level) / RunSummary (completed level)
         public uint tick;           // Swap: apply_at_tick · Death: deathTick (both client input-ticks)
         public ControlMap map;      // Swap: new absolute map · Death: checkpoint map to restore
         public byte triggerId;      // Swap: which physical SwapTrigger fired (client banner targeting)
         public byte ready;          // LobbyReady: 0|1 (strict on read, like ControlMap owners)
+        public uint timeMs;         // RunSummary: level play time
+        public ushort deaths;       // RunSummary
+        public ushort swaps;        // RunSummary
+        public uint streakMs;       // RunSummary: longest deathless span
 
-        // Largest variant (Swap) bounds the send scratch buffer; variants write fewer bytes.
-        public const int MaxSize = 1 + 4 + ControlMap.PackedSize + 1;   // = 9
+        // Largest variant (RunSummary) bounds the send scratch buffer; variants write fewer bytes.
+        public const int MaxSize = 1 + 1 + 4 + 2 + 2 + 4;   // = 14
 
         public static EventBody LevelLoad(byte sceneIndex)  => new EventBody { kind = EventKind.LevelLoad,  sceneIndex = sceneIndex };
         public static EventBody LevelReady(byte sceneIndex) => new EventBody { kind = EventKind.LevelReady, sceneIndex = sceneIndex };
@@ -126,6 +131,20 @@ namespace JumpNowBro.Networking
             new EventBody { kind = EventKind.LobbyReady, ready = isReady ? (byte)1 : (byte)0 };
         public static EventBody LobbyState(byte selectedLevel) =>
             new EventBody { kind = EventKind.LobbyState, sceneIndex = selectedLevel };
+        /// Clamps at the wire boundary: tracker stats are ints, the body is u16/u32 (negatives -> 0).
+        public static EventBody RunSummary(byte levelIndex, LevelRunStats stats) =>
+            new EventBody
+            {
+                kind = EventKind.RunSummary,
+                sceneIndex = levelIndex,
+                timeMs = ClampMs(stats.timeMs),
+                deaths = ClampU16(stats.deaths),
+                swaps = ClampU16(stats.swaps),
+                streakMs = ClampMs(stats.streakMs),
+            };
+
+        static ushort ClampU16(int v) => v < 0 ? (ushort)0 : v > ushort.MaxValue ? ushort.MaxValue : (ushort)v;
+        static uint ClampMs(int v) => v < 0 ? 0u : (uint)v;
 
         public int Write(Span<byte> dst)
         {
@@ -152,6 +171,13 @@ namespace JumpNowBro.Networking
                 case EventKind.LobbyState:
                     w.WriteByte(sceneIndex);
                     break;
+                case EventKind.RunSummary:
+                    w.WriteByte(sceneIndex);
+                    w.WriteUInt(timeMs);
+                    w.WriteUShort(deaths);
+                    w.WriteUShort(swaps);
+                    w.WriteUInt(streakMs);
+                    break;
             }
             return w.Position;
         }
@@ -161,7 +187,7 @@ namespace JumpNowBro.Networking
             body = default;
             var r = new ByteReader(src);
             if (!r.TryReadByte(out var k)) return false;
-            if (k > (byte)EventKind.LobbyState) return false;          // reject kinds we don't define
+            if (k > (byte)EventKind.RunSummary) return false;          // reject kinds we don't define
             body.kind = (EventKind)k;
             switch (body.kind)
             {
@@ -181,6 +207,12 @@ namespace JumpNowBro.Networking
                     if (!r.TryReadUInt(out body.tick)) return false;
                     if (!r.TryReadBytes(ControlMap.PackedSize, out var dm)) return false;
                     return ControlMap.TryUnpack(dm, out body.map);
+                case EventKind.RunSummary:
+                    if (!r.TryReadByte(out body.sceneIndex)) return false;
+                    if (!r.TryReadUInt(out body.timeMs)) return false;
+                    if (!r.TryReadUShort(out body.deaths)) return false;
+                    if (!r.TryReadUShort(out body.swaps)) return false;
+                    return r.TryReadUInt(out body.streakMs);
             }
             return false;
         }

@@ -81,7 +81,7 @@ namespace JumpNowBro.Networking
         string localPlayerName = "";   // #114: this player's display name from the menu (stamped into HELLO/WELCOME)
         byte localColorIndex;          // #125: assigned colour slot — host = 0, client = 1
         double clock;
-        readonly byte[] eventSendScratch = new byte[EventBody.MaxSize];   // sized to the largest EVENT variant (Swap)
+        readonly byte[] eventSendScratch = new byte[EventBody.MaxSize];   // sized to the largest EVENT variant (RunSummary)
 
         // Per-spawn role-aware components — re-bound each PlayerSpawner.OnPlayerSpawned. The dispatch
         // closures (state/input handlers) close over `this`, then read these fields fresh each call, so
