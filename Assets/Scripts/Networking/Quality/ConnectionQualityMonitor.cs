@@ -61,6 +61,8 @@ namespace JumpNowBro.Networking
         public bool Unstable { get; private set; }
         /// Diagnostics: loss ratio over the rolling window (0 while the gate is off).
         public float WindowLossRatio { get; private set; }
+        /// Diagnostics: the RTT value fed on the last Tick (what the RTT gate actually sees).
+        public float LastRttFed { get; private set; }
 
         public ConnectionQualityMonitor() : this(ConnectionQualityTuning.Default) { }
 
@@ -73,6 +75,7 @@ namespace JumpNowBro.Networking
 
         public void Tick(double dt, float rttSeconds, int packetsAcceptedTotal, int packetsMissedTotal)
         {
+            LastRttFed = rttSeconds;
             if (!baselined || packetsAcceptedTotal < lastAcceptedTotal || packetsMissedTotal < lastMissedTotal)
             {
                 // First feed, or counters went backwards (defensive: a swapped transport): baseline only.

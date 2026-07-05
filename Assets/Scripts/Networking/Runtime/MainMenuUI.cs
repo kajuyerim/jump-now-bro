@@ -22,7 +22,7 @@ namespace JumpNowBro.Networking
         TMP_InputField ipField, lobbyField, nameField;
         TMP_Text lostTitle, lostMsg, lostWaitLabel, pingLabel, statusBanner, unstableLabel;
         Button lostRejoinBtn, lostReturnBtn, soloBtn;
-        float nextPingRefresh;
+        float nextPingRefresh, nextUnstableRefresh;
         readonly Button[] levelButtons = new Button[3];
         DiscoveryService browse;                                           // passive LAN listener while the menu is up
         GameObject hostList;
@@ -71,10 +71,16 @@ namespace JumpNowBro.Networking
             }
 
             // #132: sustained degradation (hysteresis lives in the monitor). Established gate keeps it off
-            // while a host is merely listening (no peer, no data).
+            // while a host is merely listening (no peer, no data). The label carries the monitor's readout
+            // so a trip is diagnosable at a glance (which gate fired and with what values).
             bool showUnstable = showPing && net.CurrentSessionState == Session.SessionState.Established
                                          && net.ConnectionUnstable;
             if (unstableLabel.gameObject.activeSelf != showUnstable) unstableLabel.gameObject.SetActive(showUnstable);
+            if (showUnstable && Time.time >= nextUnstableRefresh)
+            {
+                nextUnstableRefresh = Time.time + 0.5f;
+                unstableLabel.text = $"Connection unstable ({net.QualityReadout})";
+            }
 
             // Pre-game status: only the client's dialing state remains here (it re-probes for ~15 s, #120).
             // The hosting "waiting for a player" surface moved into the lobby's partner card (v2.3).
@@ -207,11 +213,11 @@ namespace JumpNowBro.Networking
 
             // #132: "Connection unstable" warning under the ping readout; shown only while the quality
             // monitor's hysteresis says the link is degraded, so it never nags on a healthy LAN.
-            unstableLabel = Label(canvasGo.transform, "Connection unstable", 15, FontStyles.Bold);
+            unstableLabel = Label(canvasGo.transform, "Connection unstable", 14, FontStyles.Bold);
             var urt = unstableLabel.rectTransform;
             urt.anchorMin = urt.anchorMax = urt.pivot = new Vector2(0f, 1f);
             urt.anchoredPosition = new Vector2(18f, -124f);
-            urt.sizeDelta = new Vector2(200f, 22f);
+            urt.sizeDelta = new Vector2(360f, 22f);   // wide enough for the diagnostic readout suffix
             unstableLabel.alignment = TextAlignmentOptions.Left;
             unstableLabel.color = new Color(1f, 0.82f, 0.35f);
             unstableLabel.gameObject.SetActive(false);

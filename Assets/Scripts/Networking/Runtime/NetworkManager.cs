@@ -35,6 +35,9 @@ namespace JumpNowBro.Networking
         public int DroppedDatagrams => transport != null ? transport.DroppedDatagrams : 0;
         /// #132: sustained-degradation flag with hysteresis (RTT + inbound loss); drives the menu's subtle indicator.
         public bool ConnectionUnstable => quality != null && quality.Unstable;
+        /// #132 diagnostics: what the quality monitor actually sees, for the indicator label + the 5 s log.
+        public string QualityReadout => quality == null ? ""
+            : $"rtt {Mathf.RoundToInt(quality.LastRttFed * 1000f)} ms, loss {Mathf.RoundToInt(quality.WindowLossRatio * 100f)}%";
 
         // ---- v2.3 lobby surface (#143) ----
         /// Pre-game staging state: LobbyUI shows while true. Host: from hosting start (session may still be
@@ -73,6 +76,7 @@ namespace JumpNowBro.Networking
         bool peerReady;                // v2.3: host-side, the client's LobbyReady flag
         bool localReady;               // v2.3: client-side, its own Ready toggle
         bool clientJoinedPostVictory;  // v2.3: WELCOME carried the all-complete sentinel — show CompleteScreen, not the lobby
+        double nextQualityLog;         // #132 diagnostics: 5 s cadence for the [net-quality] console line
         Session.DisconnectReason lostReason;
         string localPlayerName = "";   // #114: this player's display name from the menu (stamped into HELLO/WELCOME)
         byte localColorIndex;          // #125: assigned colour slot — host = 0, client = 1
@@ -137,9 +141,16 @@ namespace JumpNowBro.Networking
             condChannel?.Release(clock);
             session?.Tick(Time.deltaTime);                                // session pumps its transport internally — never tick transport directly
             if (transport != null && quality != null)                     // #132: feed smoothed RTT + inbound loss counters.
+            {
                 // The EMA, not the raw sample: raw PONGs land at 1 Hz and HOLD between arrivals, so a 2 s
                 // sustain is really just two samples — jitter + sim frame-quantization then false-trips Fair.
                 quality.Tick(Time.deltaTime, transport.RttSeconds, transport.PacketsAccepted, transport.PacketsMissed);
+                if (clock >= nextQualityLog && session != null && session.State == Session.SessionState.Established)
+                {
+                    nextQualityLog = clock + 5.0;
+                    Debug.Log($"[net-quality] {QualityReadout} acc={transport.PacketsAccepted} miss={transport.PacketsMissed} unstable={quality.Unstable}");
+                }
+            }
             discovery?.Tick(clock);
             if (barrierArmed && clock >= barrierDeadline)                 // ack lost but link maybe alive: resume best-effort, let liveness own a real death
             {
