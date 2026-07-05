@@ -310,8 +310,10 @@ namespace JumpNowBro.Gameplay
                 timeTagLabel.color = Dim;
             }
 
-            // Deaths tag.
-            if (report.firstCompletion) deathsTagLabel.text = "";
+            // Deaths tag. FLAWLESS! is about THIS run, so it outranks the firstCompletion blank and
+            // replaces a deaths NEW RECORD tag (a zero-death run IS the record; one tag reads better).
+            if (stats.deaths == 0) { deathsTagLabel.text = "FLAWLESS!"; deathsTagLabel.color = Amber; }
+            else if (report.firstCompletion) deathsTagLabel.text = "";
             else
             {
                 deathsTagLabel.text = report.newFewestDeaths ? "NEW RECORD!" : $"Fewest: {report.fewestDeaths}";

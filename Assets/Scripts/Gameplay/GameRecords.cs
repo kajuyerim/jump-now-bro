@@ -35,10 +35,11 @@ namespace JumpNowBro.Gameplay
 
         public static bool IsCompleted(Mode m, int level) => PlayerPrefs.HasKey(Key(m, level, "bestTimeMs"));
 
-        /// Picker sublabel: "0:42.10 | 3 deaths", or null when the level was never completed in that mode.
+        /// Picker sublabel: "0:42.10 | 3 deaths" ("| flawless" when the fewest-deaths record is zero —
+        /// that IS the flawless-ever badge, no extra key), or null when never completed in that mode.
         public static string SublabelFor(Mode m, int level) =>
             TryGetBest(m, level, out int t, out int d)
-                ? $"{TimeFormat.MinutesSecondsCentis(t)} | {d} {(d == 1 ? "death" : "deaths")}"
+                ? $"{TimeFormat.MinutesSecondsCentis(t)} | {(d == 0 ? "flawless" : $"{d} {(d == 1 ? "death" : "deaths")}")}"
                 : null;
 
         public static RunReport ReportRun(Mode m, int level, in LevelRunStats stats)
