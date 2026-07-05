@@ -104,6 +104,9 @@ namespace JumpNowBro.Networking
             // we register a real check that returns false on Client. SinglePlayer + Hosting still pass.
             Authority.RegisterIsHost(
                 () => Instance == null || Instance.Role == GameRole.SinglePlayer || Instance.Role == GameRole.Hosting);
+            // #129 solo-vs-LAN records seam: Gameplay can't see Role, and Authority.IsHost is true for both
+            // solo and hosting, so the record writer needs its own predicate to pick the table.
+            RunSummaryController.LanSessionProvider = () => Instance != null && Instance.Role == GameRole.Hosting;
             Role = startupRole;
             if (Role == GameRole.SinglePlayer) return;
             Application.runInBackground = true;                           // keep ticking while unfocused so PINGs flow between editors (else the 5s liveness fires)
@@ -131,7 +134,13 @@ namespace JumpNowBro.Networking
                 LevelManager.Instance.OnBeforeLevelLoad += OnLevelLoadBegin;
                 LevelManager.Instance.OnLevelLoaded += OnClientLevelLoaded;
             }
+            // #130: the summary EVENT goes out at GOAL TOUCH (not at Continue's LoadNext) so the client's
+            // card shows through the hold; reliable in-order delivery lands it before the later LevelLoad.
+            if (RunSummaryController.Instance != null)
+                RunSummaryController.Instance.OnRunCompleted += HandleRunCompleted;
         }
+
+        void HandleRunCompleted(int level, LevelRunStats stats) => SendRunSummaryEvent((byte)level, stats);
 
         void Update()
         {
@@ -427,7 +436,21 @@ namespace JumpNowBro.Networking
                 switch (ev.kind)
                 {
                     case EventKind.LevelLoad:
+                        // Release the summary hold BEFORE the load: covers real scenes (IsLoading takes over)
+                        // and the 0xFE victory sentinel (the card must not cover the CompleteScreen).
+                        RunSummaryController.Instance?.HideAndRelease();
                         LevelManager.Instance?.LoadByIndex(ev.sceneIndex);
+                        break;
+                    case EventKind.RunSummary:
+                        // The host's canonical level stats, sent at its goal touch: enter the hold and show
+                        // the card until the host's Continue produces the LevelLoad above.
+                        RunSummaryController.Instance?.ShowRemote(ev.sceneIndex, new LevelRunStats
+                        {
+                            timeMs = (int)Math.Min(ev.timeMs, int.MaxValue),
+                            deaths = ev.deaths,
+                            swaps = ev.swaps,
+                            streakMs = (int)Math.Min(ev.streakMs, int.MaxValue),
+                        });
                         break;
                     case EventKind.Swap:
                         SwapScheduleDriver.Instance?.Scheduler.Schedule(ev.tick, ev.map, ev.triggerId);
@@ -506,6 +529,7 @@ namespace JumpNowBro.Networking
             currentHostRemote = null;
             lm?.ResetIndex();                                            // index < 0 -> InLobby true, lobby shows
             if (lm != null) lm.SimPaused = false;
+            RunSummaryController.Instance?.ResetAll();                   // #130: a partner Leave mid-hold ends the run — clear hold + totals
             CompleteScreen.Instance?.HidePanel();
             FindAnyObjectByType<LevelHud>()?.Clear();
             DeathNotifier.Instance?.Reset();
@@ -567,6 +591,15 @@ namespace JumpNowBro.Networking
             transport.Send(Channel.Reliable, MessageType.Event, new ReadOnlySpan<byte>(eventSendScratch, 0, n));
         }
 
+        /// Host: send the completed level's canonical stats (#130). Same guard set as SendDeathEvent — no
+        /// Established check on purpose (the reliable queue owns delivery; solo no-ops on the Role gate).
+        void SendRunSummaryEvent(byte level, LevelRunStats stats)
+        {
+            if (Role != GameRole.Hosting || transport == null) return;
+            int n = EventBody.RunSummary(level, stats).Write(eventSendScratch);
+            transport.Send(Channel.Reliable, MessageType.Event, new ReadOnlySpan<byte>(eventSendScratch, 0, n));
+        }
+
         // ---- shared ----
 
         void OnSessionStateChanged(Session.SessionState state)
@@ -585,6 +618,15 @@ namespace JumpNowBro.Networking
                     // seeded in BeginHostingFromUi). Rejoin into a running game is untouched: index >= 0
                     // skips this and the WELCOME carried the live scene.
                     SendLobbyState();
+                }
+                // #130: a client rejoining DURING the summary hold got a fresh transport that never saw the
+                // goal-time RunSummary — re-send the latched one so it re-enters the hold with the card
+                // (RunSummaryController.Account dedupes by level, so totals/records never double-book).
+                if (Role == GameRole.Hosting && RunSummaryController.Instance != null
+                    && RunSummaryController.Instance.HoldActive)
+                {
+                    var hold = RunSummaryController.Instance.CurrentHold;
+                    SendRunSummaryEvent((byte)hold.level, hold.stats);
                 }
             }
             if (state != Session.SessionState.Disconnected) return;
@@ -640,6 +682,11 @@ namespace JumpNowBro.Networking
             // index, which would leave InLobby true and the lobby covering the victory screen — flag it so
             // InLobby stays false. Self-clearing: any later WELCOME (rejoin) overwrites it.
             clientJoinedPostVictory = w.CurrentSceneIndex == LevelManager.AllLevelsCompleteSentinel;
+            // #130: 0xFF means a fresh pre-game lobby — a NEW run, not a resume. Without this, a client
+            // that crashed out of one game and rejoined a re-hosted one would carry the old run's totals
+            // and accounting latch (skipping the record write when the same level index replays). The
+            // resume path (WELCOME carries a real scene) keeps them on purpose.
+            if (w.CurrentSceneIndex == 0xFF) RunSummaryController.Instance?.ResetAll();
             // currentSceneIndex == 0xFF means host hasn't loaded yet; LoadByIndex is a no-op in that case
             // (the client sits in the lobby until the host's Start sends LEVEL_LOAD).
             LevelManager.Instance?.LoadByIndex(w.CurrentSceneIndex);
@@ -714,6 +761,9 @@ namespace JumpNowBro.Networking
             if (PlayerSpawner.Instance != null && PlayerSpawner.Instance.CurrentPlayerInstance != null)
                 Destroy(PlayerSpawner.Instance.CurrentPlayerInstance);
             currentClientRenderer = null;
+            // #130: drop a stale hold (it would freeze the reloaded level) but KEEP totals + the accounting
+            // latch — this client resumes the same run, and the host re-sends the summary if still holding.
+            RunSummaryController.Instance?.HideAndRelease();
             LevelManager.Instance?.ResetIndex();
             discovery?.Dispose(); discovery = null;
             gameplaySocket?.Dispose(); gameplaySocket = null;            // dispose the stale socket before BeginClient opens a new one
@@ -758,6 +808,7 @@ namespace JumpNowBro.Networking
             // level HUD labels. We do NOT unload the level scene here — a fire-and-forget unload from this path
             // raced the next load (see LevelManager.ResetIndex); the next session's load clears it. DeathNotifier
             // is zeroed silently (no OnDeath) so the next session's HUD starts at 0 without a teardown shake.
+            RunSummaryController.Instance?.ResetAll();                         // #130: hold + card + run totals end with the session
             CompleteScreen.Instance?.HidePanel();
             FindAnyObjectByType<LevelHud>()?.Clear();
             DeathNotifier.Instance?.Reset();

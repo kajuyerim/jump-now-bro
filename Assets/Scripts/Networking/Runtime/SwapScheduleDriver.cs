@@ -57,8 +57,13 @@ namespace JumpNowBro.Networking
 
         void FixedUpdate()
         {
-            // Don't flip into a half-loaded scene (triggers mid-destroy); HandleBeforeLevelLoad already reset us.
-            if (LevelManager.Instance != null && LevelManager.Instance.IsLoading) return;
+            // Don't flip into a half-loaded scene (triggers mid-destroy; HandleBeforeLevelLoad already reset
+            // us), and don't flip during the end-of-level summary hold (#130) — the clocks keep advancing
+            // under the hold, so a swap scheduled just before the goal would otherwise apply and sting behind
+            // the card. Deliberately NOT SimPaused: swaps applying during the LEVEL_READY barrier is existing
+            // behavior this must not silently change. Held-pending swaps die at the next load's ResetTo.
+            if (LevelManager.Instance != null
+                && (LevelManager.Instance.IsLoading || LevelManager.Instance.SummaryHold)) return;
 
             var due = Scheduler.OnTick(CurrentApplyClock);
             for (int i = 0; i < due.Count; i++)
@@ -69,6 +74,7 @@ namespace JumpNowBro.Networking
                 {
                     var old = store.Current;
                     store.Apply(due[i].Map);
+                    RunSummaryController.Instance?.NotifySwapApplied();   // #130 stat: the shared due-apply moment, identical on both ends
                     var ch = SwapDiff.FirstChange(old, due[i].Map);
                     if (ch != null) RaiseSwapCues(ch.Value.action, ch.Value.newOwner);
                 }

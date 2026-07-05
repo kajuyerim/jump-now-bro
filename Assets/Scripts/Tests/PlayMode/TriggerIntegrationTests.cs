@@ -170,17 +170,28 @@ namespace JumpNowBro.Tests.PlayMode
         }
 
         [UnityTest]
-        public IEnumerator Goal_AdvancesLevel()
+        public IEnumerator Goal_HoldsAtSummary_ThenContinueAdvances()
         {
             yield return LoadLevelAndGrabPlayer("Level_01");
             var goal = Object.FindAnyObjectByType<LevelGoal>();
             Assert.IsNotNull(goal, "Level_01 has no LevelGoal.");
 
-            // Swap the live level list for an empty one so LoadNext takes the completion path (fires OnBeforeLevelLoad
-            // + OnAllLevelsComplete) instead of actually loading the next scene under the test. Restored after.
+            // Swap the live level list for an empty one so Continue's LoadNext takes the completion path (fires
+            // OnBeforeLevelLoad + OnAllLevelsComplete) instead of actually loading the next scene. Restored after.
             var lm = LevelManager.Instance;
             var savedLevels = GetField(lm, "levelSceneNames");
             SetField(lm, "levelSceneNames", new string[0]);
+
+            // #130: the raw SceneManager loads in this fixture never drive LevelManager, so seed what a real
+            // load provides — a live tracker run and a current level index — or the goal takes the no-run
+            // fallback (instant advance) and the hold path goes untested.
+            var rsc = RunSummaryController.Instance;
+            Assert.IsNotNull(rsc, "RunSummaryController did not self-spawn.");
+            ((LevelRunTracker)GetField(rsc, "tracker")).Begin();
+            SetField(lm, "currentLevelIndex", 0);
+            // The goal accounting writes a REAL solo record for level 0 — capture the developer's, restore after.
+            int prevBestT = PlayerPrefs.GetInt("records.solo.level0.bestTimeMs", -1);
+            int prevBestD = PlayerPrefs.GetInt("records.solo.level0.fewestDeaths", -1);
 
             bool advanced = false;
             void OnBefore(int _) => advanced = true;
@@ -188,12 +199,25 @@ namespace JumpNowBro.Tests.PlayMode
             try
             {
                 yield return DriveInto(goal.GetComponent<Collider2D>());
-                Assert.IsTrue(advanced, "Reaching the goal must advance the level (LevelManager.LoadNext).");
+                Assert.IsFalse(advanced, "The goal must HOLD at the summary card, not advance immediately (#130).");
+                Assert.IsTrue(rsc.HoldActive, "Reaching the goal must enter the summary hold.");
+                Assert.IsTrue(lm.SummaryHold, "The hold must gate the sim (LevelManager.SummaryHold).");
+
+                rsc.ContinueFromCard();
+                Assert.IsTrue(advanced, "Continue must advance the level (LevelManager.LoadNext).");
+                Assert.IsFalse(lm.SummaryHold, "Continue must release the hold.");
             }
             finally
             {
                 lm.OnBeforeLevelLoad -= OnBefore;
                 SetField(lm, "levelSceneNames", savedLevels);
+                SetField(lm, "currentLevelIndex", -1);
+                rsc.ResetAll();          // hold/totals latch on the DontDestroyOnLoad controller across tests otherwise
+                if (prevBestT >= 0) PlayerPrefs.SetInt("records.solo.level0.bestTimeMs", prevBestT);
+                else PlayerPrefs.DeleteKey("records.solo.level0.bestTimeMs");
+                if (prevBestD >= 0) PlayerPrefs.SetInt("records.solo.level0.fewestDeaths", prevBestD);
+                else PlayerPrefs.DeleteKey("records.solo.level0.fewestDeaths");
+                PlayerPrefs.Save();
             }
         }
 

@@ -99,11 +99,11 @@ namespace JumpNowBro.Gameplay
 
         void FixedUpdate()
         {
-            // Freeze the sim across a level transition. IsLoading covers the unload/load window in every role
-            // (including solo/host) so the body can't free-fall once the old scene's ground unloads and rack up a
-            // phantom fall-limit death; SimPaused is the host-only barrier held until the client's LEVEL_READY ack.
-            // Mirrors the same (IsLoading || SimPaused) gate in ClientPredictor / NetworkStateBroadcaster.
-            if (LevelManager.Instance != null && (LevelManager.Instance.IsLoading || LevelManager.Instance.SimPaused)) return;
+            // Freeze the sim across a level transition (IsLoading: the body would free-fall once the old scene's
+            // ground unloads and rack up phantom fall deaths), the host's LEVEL_READY barrier (SimPaused), and
+            // the end-of-level summary hold (SummaryHold, #130). Mirrors the same SimGated gate in
+            // ClientPredictor / NetworkStateBroadcaster.
+            if (LevelManager.Instance != null && LevelManager.Instance.SimGated) return;
             if (p1 == null || p2 == null || tuning == null) return;
             if (isDead)
             {

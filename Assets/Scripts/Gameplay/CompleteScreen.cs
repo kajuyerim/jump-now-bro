@@ -59,8 +59,19 @@ namespace JumpNowBro.Gameplay
             // PlayerController is destroyed by the role-aware spawner), so we'd have shown the wrong total.
             int deaths = DeathNotifier.Instance != null ? DeathNotifier.Instance.Current
                        : (playerSpawner != null ? playerSpawner.TotalDeaths : 0);
+            string text = $"Complete!\nDeaths: {deaths}";
+            // #130 run totals. Skipped when nothing was accounted: a client that joined post-victory has no
+            // per-level history (same accepted partial-data precedent as its Deaths reading).
+            var rsc = RunSummaryController.Instance;
+            if (rsc != null && rsc.Totals.levels > 0)
+            {
+                var t = rsc.Totals;
+                text += $"\nTime: {JumpNowBro.Util.TimeFormat.MinutesSecondsCentis(t.timeMs)}"
+                      + $"   Swaps survived: {t.swaps}"
+                      + $"   Best streak: {JumpNowBro.Util.TimeFormat.MinutesSecondsCentis(t.bestStreakMs)}";
+            }
             if (summaryLabel != null)
-                summaryLabel.text = $"Complete!\nDeaths: {deaths}";
+                summaryLabel.text = text;
             if (panel != null) panel.SetActive(true);
         }
 

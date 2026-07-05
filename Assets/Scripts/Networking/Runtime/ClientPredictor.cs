@@ -65,7 +65,7 @@ namespace JumpNowBro.Networking
         void FixedUpdate()
         {
             if (sender == null || stateRenderer == null || tickClock == null || rb == null || world == null || tuning == null) return;
-            if (LevelManager.Instance != null && (LevelManager.Instance.IsLoading || LevelManager.Instance.SimPaused)) return;
+            if (LevelManager.Instance != null && LevelManager.Instance.SimGated) return;
             if (!stateRenderer.HasState) return;                       // nothing authoritative to predict from yet
 
             var authoritative = stateRenderer.CurrentState;

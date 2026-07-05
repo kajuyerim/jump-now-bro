@@ -42,6 +42,16 @@ namespace JumpNowBro.Gameplay
         /// false so solo, single-player, and the client are unaffected.
         public bool SimPaused { get; set; }
 
+        /// End-of-level summary hold (#130): set at goal touch, cleared by Continue (host/solo) or the next
+        /// LevelLoad EVENT (client). A separate flag from SimPaused ON PURPOSE — five session paths set/clear
+        /// SimPaused (barrier, Established, connection-lost, teardown) and reusing it would let any of them
+        /// silently release the hold; conversely a mid-hold connection loss must STACK its pause over this.
+        public bool SummaryHold { get; set; }
+
+        /// The one sim-gate predicate: PlayerController, ClientPredictor, and NetworkStateBroadcaster all
+        /// freeze on this (and the run timer accumulates only while it is false).
+        public bool SimGated => IsLoading || SimPaused || SummaryHold;
+
         public int LevelCount => levelSceneNames != null ? levelSceneNames.Length : 0;
 
         /// Fires at the end of LoadLevelRoutine with the loaded index — the client uses this to send LEVEL_READY.

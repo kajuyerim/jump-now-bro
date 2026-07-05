@@ -22,7 +22,12 @@ namespace JumpNowBro.Gameplay
             }
 
             fired = true;
-            manager.LoadNext();
+            // #130: route through the summary hold (freeze + stats card + Continue). NotifyGoalReached falls
+            // back to the old instant LoadNext itself when no tracked run is live; the null check here only
+            // covers a missing controller (never expected — it self-spawns).
+            var summary = RunSummaryController.Instance;
+            if (summary != null) summary.NotifyGoalReached();
+            else manager.LoadNext();
         }
     }
 }
