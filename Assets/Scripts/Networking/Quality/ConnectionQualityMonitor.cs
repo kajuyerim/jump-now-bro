@@ -23,17 +23,23 @@ namespace JumpNowBro.Networking
                                              // (a 1 Hz PING-only lobby must not read as 25% loss; the
                                              // indicator is RTT-only on sparse traffic BY DESIGN)
 
+        // EXIT thresholds must sit ABOVE the steady state of a link that's considered "fine": two-sided
+        // Fair idles at ~146-156 ms EMA with 5-8% window loss, and the original exits (0.150 / 0.06) sat
+        // BELOW that floor — one transient spike then latched Unstable forever (observed live: a client
+        // stuck Unstable while reading rtt 156 / loss 5%, well under the ENTER thresholds).
         public static ConnectionQualityTuning Default => new ConnectionQualityTuning
         {
             RttEnterSeconds = 0.220f,     // clears two-sided Fair's ~150-175 ms EMA even on slow editors (frame quantization)
-            RttExitSeconds = 0.150f,
-            LossEnterRatio = 0.15f,       // 6.3 sigma above Fair's 5% at ~186 window packets: never false-trips
-            LossExitRatio = 0.06f,
+            RttExitSeconds = 0.180f,      // above Fair's ~156 ms floor so recovery is actually reachable
+            LossEnterRatio = 0.15f,       // gross loss only; Fair's 5% cannot reach it at a full window
+            LossExitRatio = 0.10f,        // above Fair's 5-8% window wobble so it can't hold the latch
             EnterSustainSeconds = 2.0,
             ExitSustainSeconds = 3.0,
             BucketSeconds = 1.0,
             BucketCount = 6,              // 6 s window: enough samples that the 15% gate is statistically stable
-            MinWindowPackets = 20,
+            MinWindowPackets = 60,        // a small just-armed window (game start) can read 5% loss as 20%+:
+                                          // observed 23% on ~40 packets when true loss was 5%. 60+ samples
+                                          // keeps the gate honest; in-game traffic reaches it in ~1-2 s.
         };
     }
 

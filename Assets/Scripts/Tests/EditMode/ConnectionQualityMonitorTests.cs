@@ -103,12 +103,27 @@ namespace JumpNowBro.Tests
             int a = 0, x = 0; double p = 0;
             Run(m, 3f, rtt: 0.30f, pktPerSec: 30, missEvery: 0, ref a, ref x, ref p);
             Assert.IsTrue(m.Unstable);
-            Run(m, 5f, rtt: 0.16f, pktPerSec: 30, missEvery: 0, ref a, ref x, ref p);     // inside the 0.15-0.20 band
+            Run(m, 5f, rtt: 0.19f, pktPerSec: 30, missEvery: 0, ref a, ref x, ref p);     // inside the 0.18-0.22 band
             Assert.IsTrue(m.Unstable, "inside the hysteresis band must not clear");
             Run(m, 2.9f, rtt: 0.10f, pktPerSec: 30, missEvery: 0, ref a, ref x, ref p);
             Assert.IsTrue(m.Unstable, "recovery must sustain 3 s before clearing");
             Run(m, 0.3f, rtt: 0.10f, pktPerSec: 30, missEvery: 0, ref a, ref x, ref p);
             Assert.IsFalse(m.Unstable);
+        }
+
+        // Regression (observed live): two-sided Fair idles at ~150-156 ms EMA with ~5% loss. The original
+        // exit thresholds (rtt 0.150 / loss 0.06) sat BELOW that steady state, so one transient spike
+        // latched Unstable forever. Fair's steady state must be able to CLEAR a prior trip.
+        [Test]
+        public void FairSteadyState_AfterSpike_Clears()
+        {
+            var m = new ConnectionQualityMonitor();
+            int a = 0, x = 0; double p = 0;
+            Run(m, 5f, rtt: 0.155f, pktPerSec: 30, missEvery: 20, ref a, ref x, ref p);   // settle at Fair
+            Run(m, 4f, rtt: 0.155f, pktPerSec: 60, missEvery: 3, ref a, ref x, ref p);    // gross 33% loss spike
+            Assert.IsTrue(m.Unstable, "a gross loss spike must trip");
+            Run(m, 12f, rtt: 0.155f, pktPerSec: 30, missEvery: 20, ref a, ref x, ref p);  // back to Fair steady state
+            Assert.IsFalse(m.Unstable, "Fair steady state (rtt ~155 ms, 5% loss) must clear the latch");
         }
 
         [Test]
