@@ -17,6 +17,7 @@ namespace JumpNowBro.Gameplay
         {
             public bool newBestTime, newFewestDeaths, firstCompletion;
             public int bestTimeMs, fewestDeaths;      // post-update table values, so the card can print "Best: x"
+            public int prevBestTimeMs;                // the best BEFORE this run (-1 when none): the PB delta's baseline
         }
 
         /// Fired after any table change (ReportRun improvement / ResetAll) so pickers refresh their sublabels.
@@ -42,11 +43,13 @@ namespace JumpNowBro.Gameplay
 
         public static RunReport ReportRun(Mode m, int level, in LevelRunStats stats)
         {
-            if (level < 0) return default;
+            if (level < 0) return new RunReport { prevBestTimeMs = -1 };
 
             var r = new RunReport { firstCompletion = !IsCompleted(m, level) };
             int bestT = PlayerPrefs.GetInt(Key(m, level, "bestTimeMs"), int.MaxValue);
             int bestD = PlayerPrefs.GetInt(Key(m, level, "fewestDeaths"), int.MaxValue);
+            // Sentinel is unambiguous: a stored best can never equal MaxValue (a write needs timeMs < bestT).
+            r.prevBestTimeMs = bestT == int.MaxValue ? -1 : bestT;
             r.newBestTime = stats.timeMs < bestT;
             r.newFewestDeaths = stats.deaths < bestD;
             if (r.newBestTime) PlayerPrefs.SetInt(Key(m, level, "bestTimeMs"), stats.timeMs);

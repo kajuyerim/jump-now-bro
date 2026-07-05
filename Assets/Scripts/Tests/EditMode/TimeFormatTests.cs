@@ -35,5 +35,42 @@ namespace JumpNowBro.Tests
         {
             Assert.AreEqual("0:00.00", TimeFormat.MinutesSecondsCentis(-42));
         }
+
+        [Test]
+        public void SignedDelta_Negative()
+        {
+            Assert.AreEqual("-0:02.31", TimeFormat.SignedDeltaCentis(-2_310));
+        }
+
+        [Test]
+        public void SignedDelta_Positive()
+        {
+            Assert.AreEqual("+0:04.10", TimeFormat.SignedDeltaCentis(4_100));
+        }
+
+        [Test]
+        public void SignedDelta_Zero_ReadsPositive()
+        {
+            Assert.AreEqual("+0:00.00", TimeFormat.SignedDeltaCentis(0));
+        }
+
+        [Test]
+        public void SignedDelta_MinuteCarry()
+        {
+            Assert.AreEqual("-1:23.45", TimeFormat.SignedDeltaCentis(-83_450));
+        }
+
+        [Test]
+        public void SignedDelta_SubCentisecond_TruncatesToZeroMagnitude()
+        {
+            // A 1 ms improvement renders "-0:00.00" — truncation is a decision, pinned here.
+            Assert.AreEqual("-0:00.00", TimeFormat.SignedDeltaCentis(-1));
+        }
+
+        [Test]
+        public void SignedDelta_IntMinValue_DoesNotThrow()
+        {
+            Assert.DoesNotThrow(() => TimeFormat.SignedDeltaCentis(int.MinValue));
+        }
     }
 }

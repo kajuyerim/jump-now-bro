@@ -292,12 +292,28 @@ namespace JumpNowBro.Gameplay
             p2Name.color = PlayerIdentity.ColorOf(InputOwner.P2);
 
             timeLabel.text = TimeFormat.MinutesSecondsCentis(stats.timeMs);
-            // First clear: the amber banner already says it — per-stat NEW RECORD tags would be noise.
-            if (report.firstCompletion) { timeTagLabel.text = ""; deathsTagLabel.text = ""; }
+            // Time tag. First clear: the amber banner already says it — a NEW RECORD tag (and a delta with
+            // no baseline) would be noise. The PB delta is measured against the best BEFORE this run.
+            if (report.firstCompletion) timeTagLabel.text = "";
+            else if (report.newBestTime)
+            {
+                timeTagLabel.text = report.prevBestTimeMs >= 0
+                    ? $"NEW RECORD!  {TimeFormat.SignedDeltaCentis(stats.timeMs - report.prevBestTimeMs)}"
+                    : "NEW RECORD!";
+                timeTagLabel.color = Amber;
+            }
             else
             {
-                timeTagLabel.text = report.newBestTime ? "NEW RECORD!" : $"Best: {TimeFormat.MinutesSecondsCentis(report.bestTimeMs)}";
-                timeTagLabel.color = report.newBestTime ? Amber : Dim;
+                // Not first implies the key exists, so prevBestTimeMs >= 0 here.
+                timeTagLabel.text = $"Best: {TimeFormat.MinutesSecondsCentis(report.bestTimeMs)}"
+                                  + $"  ({TimeFormat.SignedDeltaCentis(stats.timeMs - report.prevBestTimeMs)})";
+                timeTagLabel.color = Dim;
+            }
+
+            // Deaths tag.
+            if (report.firstCompletion) deathsTagLabel.text = "";
+            else
+            {
                 deathsTagLabel.text = report.newFewestDeaths ? "NEW RECORD!" : $"Fewest: {report.fewestDeaths}";
                 deathsTagLabel.color = report.newFewestDeaths ? Amber : Dim;
             }
