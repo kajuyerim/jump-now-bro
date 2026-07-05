@@ -175,9 +175,11 @@ Profiles are one-way latency / jitter / loss: **Fair** ≈ 75 ms / 20 ms / 5%, *
 Phase 1 (single-player, local) and Phase 2 (the hand-rolled UDP layer) are both complete: LAN host/join
 with broadcast discovery and named lobbies, host-authoritative simulation, client-side prediction +
 reconciliation, reliable control-swap / death / level-transition `EVENT`s scheduled to a shared tick,
-graceful connection-loss handling with rejoin, and a visual pass (slime/stone/portals, a UGUI main
-menu). Verified in two-instance testing under the in-editor latency/loss simulator and on a real
-two-machine LAN.
+graceful connection-loss handling with rejoin, an end-of-level co-op summary (the sim holds at the goal
+while both screens celebrate the same host-computed time / deaths / swaps / streak, delivered over the
+reliable channel) with persistent per-level records (separate solo and LAN tables, shown on the level
+pickers), and a visual pass (slime/stone/portals, a UGUI main menu). Verified in two-instance testing
+under the in-editor latency/loss simulator and on a real two-machine LAN.
 
 ## License
 

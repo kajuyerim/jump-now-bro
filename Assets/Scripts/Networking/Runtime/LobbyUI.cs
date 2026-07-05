@@ -34,6 +34,7 @@ namespace JumpNowBro.Networking
         Button startBtn, readyBtn, leaveBtn;
         TMP_Text startHint, readyLabel, clientHint, clientLevelLabel;
         Button[] levelButtons;
+        TMP_Text[] levelButtonLabels;
         bool visible;
         float nextRefresh;
 
@@ -60,6 +61,7 @@ namespace JumpNowBro.Networking
         {
             if (Instance == this) Instance = null;
             PlayerIdentity.OnChanged -= OnIdentityChanged;
+            GameRecords.OnChanged -= OnRecordsChanged;
         }
 
         void Update()
@@ -73,13 +75,16 @@ namespace JumpNowBro.Networking
                 if (show)
                 {
                     PlayerIdentity.OnChanged += OnIdentityChanged;
+                    GameRecords.OnChanged += OnRecordsChanged;    // #129: Reset-records (settings opens over the lobby) live-refreshes
                     EnsureLevelButtons();
+                    RefreshLevelRecordLabels();
                     Refresh(net);
                     SelectFirst(net);
                 }
                 else
                 {
                     PlayerIdentity.OnChanged -= OnIdentityChanged;
+                    GameRecords.OnChanged -= OnRecordsChanged;
                 }
             }
             if (!show) return;
@@ -95,6 +100,7 @@ namespace JumpNowBro.Networking
         }
 
         void OnIdentityChanged() { if (visible && NetworkManager.Instance != null) Refresh(NetworkManager.Instance); }
+        void OnRecordsChanged() { if (visible) RefreshLevelRecordLabels(); }
 
         GameObject FirstSelectable(NetworkManager net) =>
             net.Role == GameRole.Hosting
@@ -178,16 +184,35 @@ namespace JumpNowBro.Networking
         {
             if (levelButtons != null) return;
             int count = LevelManager.Instance != null ? LevelManager.Instance.LevelCount : 0;
-            if (count <= 0) { levelButtons = new Button[0]; return; }
+            if (count <= 0) { levelButtons = new Button[0]; levelButtonLabels = new TMP_Text[0]; return; }
             levelButtons = new Button[count];
+            levelButtonLabels = new TMP_Text[count];
             for (int i = 0; i < count; i++)
             {
                 int idx = i;
-                levelButtons[i] = UiKit.MakeButton(levelRow.transform, "Level " + (i + 1), 130, 48, () =>
+                // Taller than the old 48: line 2 carries the LAN record sublabel (#129).
+                levelButtons[i] = UiKit.MakeButton(levelRow.transform, "Level " + (i + 1), 130, 62, () =>
                 {
                     var net = NetworkManager.Instance;
                     if (net != null) { net.SetLobbyLevel(idx); Refresh(net); }
                 });
+                levelButtonLabels[i] = levelButtons[i].GetComponentInChildren<TMP_Text>();
+                if (levelButtonLabels[i] != null) levelButtonLabels[i].textWrappingMode = TextWrappingModes.NoWrap;
+            }
+        }
+
+        // #129: LAN-table record sublabels (the menu's row shows the solo table — each surface its own mode).
+        void RefreshLevelRecordLabels()
+        {
+            if (levelButtonLabels == null) return;
+            for (int i = 0; i < levelButtonLabels.Length; i++)
+            {
+                var lbl = levelButtonLabels[i];
+                if (lbl == null) continue;
+                string line = GameRecords.SublabelFor(GameRecords.Mode.Lan, i);
+                lbl.text = line != null
+                    ? $"Level {i + 1}\n<size=12><color=#8FD08F>{line}</color></size>"
+                    : $"Level {i + 1}\n<size=12><color=#FFFFFF80>no record</color></size>";
             }
         }
 
@@ -234,7 +259,10 @@ namespace JumpNowBro.Networking
             }
             else
             {
-                clientLevelLabel.text = "Level " + (net.LobbySelectedLevel + 1);
+                // #129: the client sees its own machine's LAN record for the host's pick.
+                string rec = GameRecords.SublabelFor(GameRecords.Mode.Lan, net.LobbySelectedLevel);
+                clientLevelLabel.text = "Level " + (net.LobbySelectedLevel + 1)
+                    + (rec != null ? $"\n<size=13><color=#8FD08F>{rec}</color></size>" : "");
                 readyLabel.text = net.LocalReady ? "Ready: On" : "Ready: Off";
                 clientHint.text = net.LocalReady ? "Waiting for the host to start..." : "";
             }

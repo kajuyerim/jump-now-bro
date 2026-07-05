@@ -41,6 +41,10 @@ namespace JumpNowBro.Gameplay
         TMP_Text rebindStatus, p1Header, p2Header;
         readonly List<(InputRebinds.Cell cell, TMP_Text label)> rebindCells = new List<(InputRebinds.Cell, TMP_Text)>();
 
+        // #129 Data tab: two-click-armed records reset
+        TMP_Text recordsResetLabel, recordsStatus;
+        float recordsResetArmedUntil;
+
         readonly List<Vector2Int> resOptions = new List<Vector2Int>();
         int resIndex;
         int qualityIndex;
@@ -127,6 +131,10 @@ namespace JumpNowBro.Gameplay
             vsyncLabel.text = "VSync: " + (GameSettings.VSync ? "On" : "Off");
             paletteLabel.text = "Colourblind palette: " + (GameSettings.PaletteMode != 0 ? "On" : "Off");
             RefreshRebindLabels();   // saved overrides may have restored after this panel was built
+            // #129: disarm a half-armed records reset from a previous open.
+            recordsResetArmedUntil = 0f;
+            if (recordsResetLabel != null) recordsResetLabel.text = "Reset records";
+            if (recordsStatus != null) recordsStatus.text = "";
             RefreshResLabel();
             qualityIndex = Mathf.Clamp(GameSettings.QualityLevel, 0, Mathf.Max(0, QualitySettings.names.Length - 1));
             RefreshQualityLabel();
@@ -173,7 +181,7 @@ namespace JumpNowBro.Gameplay
             // #135: tabs (the controls grid would overflow a single column). Content lives in per-tab
             // columns under the same card; SelectTab toggles visibility and the fitter re-sizes the card.
             var tabBar = Row(card.transform);
-            string[] tabNames = { "Audio", "Display", "Controls", "Access" };
+            string[] tabNames = { "Audio", "Display", "Controls", "Access", "Data" };
             tabs = new GameObject[tabNames.Length];
             tabButtons = new Image[tabNames.Length];
             for (int i = 0; i < tabNames.Length; i++)
@@ -222,6 +230,13 @@ namespace JumpNowBro.Gameplay
                 GameSettings.SetPaletteMode(mode);
                 paletteLabel.text = "Colourblind palette: " + (mode != 0 ? "On" : "Off");
             });
+
+            // -- Data (#129: per-level records) --
+            var data = tabs[4].transform;
+            Label(data, "Records are stored separately for solo and LAN.", 13, FontStyles.Italic, 0.5f);
+            var resetBtn = MakeButton(data, "Reset records", 360, 40, OnResetRecordsClicked);
+            recordsResetLabel = resetBtn.GetComponentInChildren<TMP_Text>();
+            recordsStatus = Label(data, "", 14, FontStyles.Italic, 0.85f);
 
             MakeButton(card.transform, "Back", 360, 48, Close);
             SelectTab(0);
@@ -280,6 +295,24 @@ namespace JumpNowBro.Gameplay
                 RefreshRebindLabels();
                 rebindStatus.text = "Controls reset to defaults";
             });
+        }
+
+        // Records are precious and this wipes both tables: arm on the first click, execute only on a
+        // second click inside 3 s (mirrors the destructive-action caution of the Controls reset, but that
+        // one is recoverable by rebinding — records are not).
+        void OnResetRecordsClicked()
+        {
+            if (Time.unscaledTime > recordsResetArmedUntil)
+            {
+                recordsResetArmedUntil = Time.unscaledTime + 3f;
+                recordsResetLabel.text = "Really reset? Click again";
+                recordsStatus.text = "";
+                return;
+            }
+            recordsResetArmedUntil = 0f;
+            recordsResetLabel.text = "Reset records";
+            GameRecords.ResetAll(LevelManager.Instance != null ? LevelManager.Instance.LevelCount : 8);
+            recordsStatus.text = "Records cleared";
         }
 
         TMP_Text HeaderCell(Transform parent, string text)

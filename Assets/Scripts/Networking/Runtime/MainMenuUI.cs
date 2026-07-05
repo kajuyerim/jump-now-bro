@@ -34,6 +34,12 @@ namespace JumpNowBro.Networking
             net = GetComponent<NetworkManager>();
             FindAnyObjectByType<LevelManager>()?.SuppressAutoStart();           // UI is the entry point
             Build();
+            GameRecords.OnChanged += RefreshLevelRecords;                       // #129: Reset-records live-refreshes the pickers
+        }
+
+        void OnDestroy()
+        {
+            GameRecords.OnChanged -= RefreshLevelRecords;
         }
 
         void Update()
@@ -43,7 +49,11 @@ namespace JumpNowBro.Networking
             if (menu.activeSelf != idle)
             {
                 menu.SetActive(idle);
-                if (idle) UnityEngine.EventSystems.EventSystem.current?.SetSelectedGameObject(soloBtn.gameObject);
+                if (idle)
+                {
+                    UnityEngine.EventSystems.EventSystem.current?.SetSelectedGameObject(soloBtn.gameObject);
+                    RefreshLevelRecords();                                       // #129: a run just ended — show any new bests
+                }
             }
             // #134: keep a selection alive while a full-screen surface is up, so gamepad/keyboard navigation
             // always has somewhere to start (a background click or destroyed object can null the selection).
@@ -105,6 +115,24 @@ namespace JumpNowBro.Networking
             else DisposeBrowse();                                                // free the discovery port before a session binds it
         }
 
+        // #129: solo-table record sublabels on the menu's level pickers (the lobby's row shows the LAN
+        // table — each surface shows its own mode). Explicit \n + <size> rich text: TMP would wrap the
+        // record line unpredictably inside the 150 px button otherwise.
+        void RefreshLevelRecords()
+        {
+            for (int i = 0; i < levelButtons.Length; i++)
+            {
+                if (levelButtons[i] == null) continue;
+                var lbl = levelButtons[i].GetComponentInChildren<TMP_Text>();
+                if (lbl == null) continue;
+                lbl.textWrappingMode = TextWrappingModes.NoWrap;
+                string line = GameRecords.SublabelFor(GameRecords.Mode.Solo, i);
+                lbl.text = line != null
+                    ? $"Level {i + 1}\n<size=13><color=#8FD08F>{line}</color></size>"
+                    : $"Level {i + 1}\n<size=13><color=#FFFFFF80>no record</color></size>";
+            }
+        }
+
         void SelectLevel(int i)
         {
             if (LevelManager.Instance != null) LevelManager.Instance.PendingStartIndex = i;
@@ -147,8 +175,10 @@ namespace JumpNowBro.Networking
             for (int i = 0; i < 3; i++)
             {
                 int idx = i;
-                levelButtons[i] = MakeButton(lvlRow.transform, "Level " + (i + 1), 150, 54, () => SelectLevel(idx));
+                // Taller than the other menu buttons: line 2 carries the solo record sublabel (#129).
+                levelButtons[i] = MakeButton(lvlRow.transform, "Level " + (i + 1), 150, 68, () => SelectLevel(idx));
             }
+            RefreshLevelRecords();
 
             soloBtn = MakeButton(col.transform, "Solo (single-player)", 330, 54, () => { DisposeBrowse(); net.BeginSoloFromUi(); });
 
