@@ -41,8 +41,11 @@ namespace JumpNowBro.Gameplay
         TMP_Text rebindStatus, p1Header, p2Header;
         readonly List<(InputRebinds.Cell cell, TMP_Text label)> rebindCells = new List<(InputRebinds.Cell, TMP_Text)>();
 
-        // #129 Data tab: two-click-armed records reset
-        TMP_Text recordsResetLabel, recordsStatus;
+        // #129/#149 Data tab: lifetime line + two-click-armed reset. The idle button text lives in ONE
+        // const — it is (re)written at construction, disarm-on-open, and post-execute, and a mismatch
+        // would mislabel a button that wipes lifetime too.
+        const string RecordsResetIdle = "Reset records + lifetime";
+        TMP_Text lifetimeLabel, recordsResetLabel, recordsStatus;
         float recordsResetArmedUntil;
 
         readonly List<Vector2Int> resOptions = new List<Vector2Int>();
@@ -131,10 +134,11 @@ namespace JumpNowBro.Gameplay
             vsyncLabel.text = "VSync: " + (GameSettings.VSync ? "On" : "Off");
             paletteLabel.text = "Colourblind palette: " + (GameSettings.PaletteMode != 0 ? "On" : "Off");
             RefreshRebindLabels();   // saved overrides may have restored after this panel was built
-            // #129: disarm a half-armed records reset from a previous open.
+            // #129/#149: disarm a half-armed reset from a previous open; refresh the lifetime line.
             recordsResetArmedUntil = 0f;
-            if (recordsResetLabel != null) recordsResetLabel.text = "Reset records";
+            if (recordsResetLabel != null) recordsResetLabel.text = RecordsResetIdle;
             if (recordsStatus != null) recordsStatus.text = "";
+            RefreshLifetimeLine();
             RefreshResLabel();
             qualityIndex = Mathf.Clamp(GameSettings.QualityLevel, 0, Mathf.Max(0, QualitySettings.names.Length - 1));
             RefreshQualityLabel();
@@ -231,10 +235,11 @@ namespace JumpNowBro.Gameplay
                 paletteLabel.text = "Colourblind palette: " + (mode != 0 ? "On" : "Off");
             });
 
-            // -- Data (#129: per-level records) --
+            // -- Data (#129 records + #149 lifetime totals) --
             var data = tabs[4].transform;
+            lifetimeLabel = Label(data, "", 14, FontStyles.Normal, 0.85f);
             Label(data, "Records are stored separately for solo and LAN.", 13, FontStyles.Italic, 0.5f);
-            var resetBtn = MakeButton(data, "Reset records", 360, 40, OnResetRecordsClicked);
+            var resetBtn = MakeButton(data, RecordsResetIdle, 360, 40, OnResetRecordsClicked);
             recordsResetLabel = resetBtn.GetComponentInChildren<TMP_Text>();
             recordsStatus = Label(data, "", 14, FontStyles.Italic, 0.85f);
 
@@ -251,6 +256,7 @@ namespace JumpNowBro.Gameplay
                 tabButtons[i].color = i == index ? new Color(0.30f, 0.55f, 0.95f, 1f) : new Color(1f, 1f, 1f, 0.15f);
             }
             firstSelectable = tabButtons[index].gameObject;
+            if (index == 4) RefreshLifetimeLine();   // #149: totals may have grown since the panel opened
             if (IsOpen && EventSystem.current != null)
                 EventSystem.current.SetSelectedGameObject(firstSelectable);
         }
@@ -310,9 +316,20 @@ namespace JumpNowBro.Gameplay
                 return;
             }
             recordsResetArmedUntil = 0f;
-            recordsResetLabel.text = "Reset records";
+            recordsResetLabel.text = RecordsResetIdle;
             GameRecords.ResetAll(LevelManager.Instance != null ? LevelManager.Instance.LevelCount : 8);
-            recordsStatus.text = "Records cleared";
+            recordsStatus.text = "Records + lifetime cleared";
+            RefreshLifetimeLine();
+        }
+
+        // The panel is a non-pausing overlay: a level can complete while the Data tab is open, so the
+        // line refreshes on open, on tab select, and after the wipe (not per-frame).
+        void RefreshLifetimeLine()
+        {
+            if (lifetimeLabel == null) return;
+            lifetimeLabel.text =
+                $"Played {JumpNowBro.Util.TimeFormat.HoursMinutesSeconds(GameRecords.LifetimePlaytimeSec)}"
+                + $"  |  {GameRecords.LifetimeDeaths} deaths  |  {GameRecords.LifetimeSwaps} swaps survived";
         }
 
         TMP_Text HeaderCell(Transform parent, string text)

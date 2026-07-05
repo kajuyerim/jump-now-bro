@@ -219,6 +219,7 @@ namespace JumpNowBro.Gameplay
             totals.deaths += stats.deaths;
             totals.swaps += stats.swaps;
             if (stats.streakMs > totals.bestStreakMs) totals.bestStreakMs = stats.streakMs;
+            GameRecords.AddLifetime(stats);                       // #149: latch-guarded, so once per level
             lastReport = GameRecords.ReportRun(mode, level, stats);
             return lastReport;
         }

@@ -73,8 +73,31 @@ namespace JumpNowBro.Gameplay
                     PlayerPrefs.DeleteKey(Key((Mode)m, i, "bestTimeMs"));
                     PlayerPrefs.DeleteKey(Key((Mode)m, i, "fewestDeaths"));
                 }
+            PlayerPrefs.DeleteKey(KLifePlay);
+            PlayerPrefs.DeleteKey(KLifeDeaths);
+            PlayerPrefs.DeleteKey(KLifeSwaps);
             PlayerPrefs.Save();
             OnChanged?.Invoke();
+        }
+
+        // ---- lifetime totals (#149): per-machine, mode-agnostic, COMPLETED levels only (aborted runs
+        // and menu time do not count). Monotonic — no session flow resets these; only the wipe above. ----
+
+        const string KLifePlay   = "lifetime.playtimeSec";
+        const string KLifeDeaths = "lifetime.deaths";
+        const string KLifeSwaps  = "lifetime.swaps";
+
+        public static int LifetimePlaytimeSec => PlayerPrefs.GetInt(KLifePlay, 0);
+        public static int LifetimeDeaths      => PlayerPrefs.GetInt(KLifeDeaths, 0);
+        public static int LifetimeSwaps       => PlayerPrefs.GetInt(KLifeSwaps, 0);
+
+        /// One call per completed level; the caller's accounting latch keeps rejoin re-sends out.
+        public static void AddLifetime(in LevelRunStats stats)
+        {
+            PlayerPrefs.SetInt(KLifePlay, LifetimePlaytimeSec + (stats.timeMs + 500) / 1000);
+            PlayerPrefs.SetInt(KLifeDeaths, LifetimeDeaths + stats.deaths);
+            PlayerPrefs.SetInt(KLifeSwaps, LifetimeSwaps + stats.swaps);
+            PlayerPrefs.Save();
         }
     }
 }

@@ -22,5 +22,15 @@ namespace JumpNowBro.Util
             if (magnitude < 0) magnitude = -magnitude;
             return (deltaMs < 0 ? "-" : "+") + MinutesSecondsCentis((int)System.Math.Min(magnitude, int.MaxValue));
         }
+
+        /// h:mm:ss for lifetime totals ("0:03:12"; hours unbounded; negatives clamp).
+        public static string HoursMinutesSeconds(int totalSeconds)
+        {
+            if (totalSeconds < 0) totalSeconds = 0;
+            int seconds = totalSeconds % 60;
+            int minutes = totalSeconds / 60 % 60;
+            int hours = totalSeconds / 3600;
+            return $"{hours}:{minutes:D2}:{seconds:D2}";
+        }
     }
 }

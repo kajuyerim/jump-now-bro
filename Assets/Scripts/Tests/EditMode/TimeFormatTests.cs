@@ -72,5 +72,29 @@ namespace JumpNowBro.Tests
         {
             Assert.DoesNotThrow(() => TimeFormat.SignedDeltaCentis(int.MinValue));
         }
+
+        [Test]
+        public void HoursMinutesSeconds_Zero()
+        {
+            Assert.AreEqual("0:00:00", TimeFormat.HoursMinutesSeconds(0));
+        }
+
+        [Test]
+        public void HoursMinutesSeconds_SubHour()
+        {
+            Assert.AreEqual("0:03:12", TimeFormat.HoursMinutesSeconds(192));
+        }
+
+        [Test]
+        public void HoursMinutesSeconds_MultiHour()
+        {
+            Assert.AreEqual("2:34:12", TimeFormat.HoursMinutesSeconds(9_252));
+        }
+
+        [Test]
+        public void HoursMinutesSeconds_Negative_ClampsToZero()
+        {
+            Assert.AreEqual("0:00:00", TimeFormat.HoursMinutesSeconds(-5));
+        }
     }
 }
