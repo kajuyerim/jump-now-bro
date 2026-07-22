@@ -67,6 +67,7 @@ flowchart TB
   EV --> ELB["LobbyReady: ready flag (client to host)"]
   EV --> ELS["LobbyState: selected level (host to client)"]
   EV --> ERS["RunSummary: level run stats at goal (host to client)"]
+  EV --> ECO["Callout / WorldPing / Countdown: comms (both ways)"]
 ```
 
 <sub>The strict unreliable/reliable split: `INPUT`/`STATE`/`PING`/`PONG` are lossy; `HELLO`/`WELCOME`/`GOODBYE` and the `EVENT` union are sequenced, acked, and retransmitted.</sub>
@@ -75,13 +76,19 @@ flowchart TB
 (each frame: bits for moveLeft/moveRight/jumpPressed/jumpHeld/dashPressed). `STATE` is 61 bytes:
 `snapshotTick` + `lastConsumedClientTick` + `deathCount` + `sceneIndex` + `ControlMap(3 B)` +
 `remoteInputFrame(1 B)` + a 46-byte `MovementState`. `EVENT` is a discriminated union keyed on
-`EventKind { LevelLoad, Swap, Death, LevelReady, LobbyReady, LobbyState, RunSummary }` (the lobby pair
-carries the pre-game ready-up: the client's 1-byte ready flag up, the host's 1-byte level pick down; their
-addition bumped the session protocol to **v3** so a pre-lobby peer fails the handshake loudly instead of
-hanging in a lobby it cannot see. `RunSummary` carries the completed level's canonical stats, level index +
-time/deaths/swaps/longest-deathless-streak in 14 bytes, sent at goal touch so both ends celebrate the same
-numbers on the summary card; it bumped the protocol to **v4**, since a v3 peer would keep simming through
-the host's end-of-level hold). The wire formats are **forward-compatible by
+`EventKind { LevelLoad, Swap, Death, LevelReady, LobbyReady, LobbyState, RunSummary, Callout, WorldPing,
+Countdown }` (the lobby pair carries the pre-game ready-up: the client's 1-byte ready flag up, the host's
+1-byte level pick down; their addition bumped the session protocol to **v3** so a pre-lobby peer fails the
+handshake loudly instead of hanging in a lobby it cannot see. `RunSummary` carries the completed level's
+canonical stats, level index + time/deaths/swaps/longest-deathless-streak in 14 bytes, sent at goal touch
+so both ends celebrate the same numbers on the summary card; it bumped the protocol to **v4**, since a v3
+peer would keep simming through the host's end-of-level hold. The comms trio, `Callout` = a 1-byte canned
+callout id, `WorldPing` = an x/y f32 world marker, `Countdown` = a u32 GO-beat tick, are the first
+**symmetric** kinds: either peer originates them, and since the channel is point-to-point the receive
+direction alone identifies the sender, no sender byte on the wire. `Countdown` reuses the client-input-tick
+coordinate that swaps apply on, so the GO beat lands on the same logical tick on both screens; the trio
+bumped the protocol to **v5**, since a v4 peer's read boundary silently drops every comms kind and would
+leave the signals one-sided). The wire formats are **forward-compatible by
 reserve-and-tolerate**, `MovementState`'s trailing padding bytes and the input frame's reserved bits let a
 newer sender append fields an older reader silently ignores, so new facts go on the wire without a version
 bump. Every deserializer is bounds-checked and **returns `false` instead of throwing** on a short or

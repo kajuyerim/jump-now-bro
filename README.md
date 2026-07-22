@@ -70,10 +70,17 @@ split keyboard.
 | Move (left/right) | A / D | ← / → |
 | Jump | Left Shift | Space |
 | Dash | Left Ctrl | Right Shift |
+| Comms: GO countdown / Wait / Sorry / Nice | 1 / 2 / 3 / 4 (top row, both players) | |
+| Comms: location ping | Mouse click (both players) | |
 
 **LAN (each player on their own keyboard):** both solo layouts work for everyone, Move = WASD or arrows,
 Jump = Space or Left Shift, Dash = Right Shift or Left Ctrl. Every binding is remappable per player half
-in Settings, Controls (rebinds apply to solo and LAN alike).
+in Settings, Controls (rebinds apply to solo and LAN alike; the comms keys are fixed).
+
+**Non-verbal comms:** keys 1 to 4 (top row; the numpad is not bound) and the mouse are per machine, not
+per player half. Key 1 starts a synced **3-2-1-GO!** countdown whose GO lands on the same logical tick on
+both screens; 2/3/4 pop a WAIT / SORRY / NICE speech bubble above the character in the sender's colour;
+clicking the level drops a brief location marker on both screens.
 
 ## How it's built (at a glance)
 
@@ -178,8 +185,10 @@ reconciliation, reliable control-swap / death / level-transition `EVENT`s schedu
 graceful connection-loss handling with rejoin, an end-of-level co-op summary (the sim holds at the goal
 while both screens celebrate the same host-computed time / deaths / swaps / streak, delivered over the
 reliable channel) with persistent per-level records (separate solo and LAN tables, shown on the level
-pickers), and a visual pass (slime/stone/portals, a UGUI main menu). Verified in two-instance testing
-under the in-editor latency/loss simulator and on a real two-machine LAN.
+pickers), non-verbal coordination comms (canned callouts and a location ping on both screens, plus a
+synced 3-2-1-GO countdown landing on a shared tick), and a visual pass (slime/stone/portals, a UGUI main
+menu). Verified in two-instance testing under the in-editor latency/loss simulator and on a real
+two-machine LAN.
 
 ## License
 
