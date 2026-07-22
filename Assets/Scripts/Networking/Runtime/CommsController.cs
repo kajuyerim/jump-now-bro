@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
 using JumpNowBro.Gameplay;
 using JumpNowBro.Util;
@@ -25,7 +26,12 @@ namespace JumpNowBro.Networking
         const int LeadCap       = 20;
 
         float nextKeySendTime;              // keys 1-4 share one bucket (a re-press inside it is spam)
+        float nextPingSendTime;             // pings get their own bucket — a callout must not lock out an immediate "here"
         bool victoryLatch;                  // comms dead on the victory screen — see HandleAllLevelsComplete
+
+        // One live marker per sender (P1 = slot 0), newest replaces. Held here because markers are
+        // scene-less and must die on level load/teardown, not with any scene.
+        readonly PingMarker[] livePings = new PingMarker[2];
 
         // Synced GO countdown (#152): a single pending goTick, newest-GO-wins (see CountdownBeats).
         bool countdownActive;
@@ -90,17 +96,26 @@ namespace JumpNowBro.Networking
         {
             countdownActive = false;
             CalloutBubble.HideImmediate();
+            for (int i = 0; i < livePings.Length; i++)
+            {
+                if (livePings[i] != null) Destroy(livePings[i].gameObject);
+                livePings[i] = null;
+            }
             victoryLatch = false;
         }
 
         void Update()
         {
             var kb = Keyboard.current;
-            if (kb == null) return;
-            if (kb.digit1Key.wasPressedThisFrame) TrySendCountdown();
-            if (kb.digit2Key.wasPressedThisFrame) TrySendCallout(CalloutId.Wait);
-            if (kb.digit3Key.wasPressedThisFrame) TrySendCallout(CalloutId.Sorry);
-            if (kb.digit4Key.wasPressedThisFrame) TrySendCallout(CalloutId.Nice);
+            if (kb != null)
+            {
+                if (kb.digit1Key.wasPressedThisFrame) TrySendCountdown();
+                if (kb.digit2Key.wasPressedThisFrame) TrySendCallout(CalloutId.Wait);
+                if (kb.digit3Key.wasPressedThisFrame) TrySendCallout(CalloutId.Sorry);
+                if (kb.digit4Key.wasPressedThisFrame) TrySendCallout(CalloutId.Nice);
+            }
+            var mouse = Mouse.current;
+            if (mouse != null && mouse.leftButton.wasPressedThisFrame) TrySendPing(mouse.position.ReadValue());
         }
 
         // The beat driver. Gated like SwapScheduleDriver's due-loop (null-tolerant, deliberately NOT
@@ -217,6 +232,33 @@ namespace JumpNowBro.Networking
             if (!countdownActive) return;
             countdownActive = false;
             if (lastShownBeat <= CountdownBeats.BeatCount) CalloutBubble.HideImmediate();   // a beat is on screen
+        }
+
+        void TrySendPing(Vector2 screenPos)
+        {
+            if (!CanSendComms || Time.unscaledTime < nextPingSendTime) return;
+            var cam = Camera.main;
+            if (cam == null) return;
+            if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject()) return;   // Leave bar / card buttons
+            var w = cam.ScreenToWorldPoint(screenPos);
+            w.z = 0f;   // ScreenToWorldPoint lands on the camera plane (z -10), inside the near clip — the echo would be invisible
+            nextPingSendTime = Time.unscaledTime + SendCooldown;
+            ShowPing(LocalOwner, new Vector2(w.x, w.y));
+            NetworkManager.Instance?.SendWorldPingEvent(w.x, w.y);              // no-op solo (null transport)
+        }
+
+        public void ReceivePing(Vector2 pos)
+        {
+            if (!CanReceiveComms) return;
+            ShowPing(RemoteOwner, pos);
+        }
+
+        void ShowPing(InputOwner sender, Vector2 pos)
+        {
+            int slot = sender == InputOwner.P1 ? 0 : 1;
+            if (livePings[slot] != null) Destroy(livePings[slot].gameObject);   // one live ping per sender, newest replaces
+            livePings[slot] = PingMarker.Spawn(pos, PlayerIdentity.ColorOf(sender));
+            AudioManager.Instance?.PlayPing();
         }
 
         // The shared clock (SwapScheduleDriver.CurrentApplyClock, copied): the host measures goTick against

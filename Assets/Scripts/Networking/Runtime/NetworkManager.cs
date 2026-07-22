@@ -441,6 +441,9 @@ namespace JumpNowBro.Networking
                 case EventKind.Countdown:
                     CommsController.Instance?.ReceiveCountdown(ev.tick);
                     return;
+                case EventKind.WorldPing:
+                    CommsController.Instance?.ReceivePing(new Vector2(ev.pingX, ev.pingY));
+                    return;
             }
 
             if (Role == GameRole.Client)
