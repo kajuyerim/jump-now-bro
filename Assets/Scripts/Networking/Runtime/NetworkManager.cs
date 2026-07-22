@@ -438,6 +438,9 @@ namespace JumpNowBro.Networking
                 case EventKind.Callout:
                     CommsController.Instance?.ReceiveCallout((CalloutId)ev.calloutId);
                     return;
+                case EventKind.Countdown:
+                    CommsController.Instance?.ReceiveCountdown(ev.tick);
+                    return;
             }
 
             if (Role == GameRole.Client)

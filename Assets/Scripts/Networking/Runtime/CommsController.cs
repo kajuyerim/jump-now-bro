@@ -19,8 +19,19 @@ namespace JumpNowBro.Networking
         // Self-throttle: nothing else rate-limits, and the reliable queue silently drops past 64 in flight.
         const float SendCooldown = 0.45f;
 
+        // SwapScheduleDriver's lead constants, duplicated: comms may not couple to the swap driver's privates.
+        const int BaseLeadTicks = 9;        // ~0.15 s at 60 Hz
+        const int LeadFloor     = 6;
+        const int LeadCap       = 20;
+
         float nextKeySendTime;              // keys 1-4 share one bucket (a re-press inside it is spam)
         bool victoryLatch;                  // comms dead on the victory screen — see HandleAllLevelsComplete
+
+        // Synced GO countdown (#152): a single pending goTick, newest-GO-wins (see CountdownBeats).
+        bool countdownActive;
+        uint countdownGoTick;
+        InputOwner countdownSender;
+        int lastShownBeat;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         static void AutoSpawn()
@@ -44,6 +55,9 @@ namespace JumpNowBro.Networking
                 LevelManager.Instance.OnBeforeLevelLoad += HandleBeforeLevelLoad;
                 LevelManager.Instance.OnAllLevelsComplete += HandleAllLevelsComplete;
             }
+            // Fires on both roles (host via PlayerController, client via the STATE death-count delta) — a
+            // GO scheduled before a death must never fire after the respawn.
+            if (DeathNotifier.Instance != null) DeathNotifier.Instance.OnDeath += HandleDeath;
         }
 
         void OnDestroy()
@@ -53,8 +67,11 @@ namespace JumpNowBro.Networking
                 LevelManager.Instance.OnBeforeLevelLoad -= HandleBeforeLevelLoad;
                 LevelManager.Instance.OnAllLevelsComplete -= HandleAllLevelsComplete;
             }
+            if (DeathNotifier.Instance != null) DeathNotifier.Instance.OnDeath -= HandleDeath;
             if (Instance == this) Instance = null;
         }
+
+        void HandleDeath(int _) => CancelCountdown();
 
         void HandleBeforeLevelLoad(int _) => ResetAll();
 
@@ -71,6 +88,7 @@ namespace JumpNowBro.Networking
         /// the connection-loss surface — a comm never outlives the moment it was about.
         public void ResetAll()
         {
+            countdownActive = false;
             CalloutBubble.HideImmediate();
             victoryLatch = false;
         }
@@ -79,9 +97,37 @@ namespace JumpNowBro.Networking
         {
             var kb = Keyboard.current;
             if (kb == null) return;
+            if (kb.digit1Key.wasPressedThisFrame) TrySendCountdown();
             if (kb.digit2Key.wasPressedThisFrame) TrySendCallout(CalloutId.Wait);
             if (kb.digit3Key.wasPressedThisFrame) TrySendCallout(CalloutId.Sorry);
             if (kb.digit4Key.wasPressedThisFrame) TrySendCallout(CalloutId.Nice);
+        }
+
+        // The beat driver. Gated like SwapScheduleDriver's due-loop (null-tolerant, deliberately NOT
+        // SimPaused — the loss surface clears comms via ResetAll instead), so a countdown never beats
+        // through a level load or behind the summary card; IsStale mops up one that sat under a hold.
+        void FixedUpdate()
+        {
+            if (!countdownActive) return;
+            var lm = LevelManager.Instance;
+            if (lm != null && (lm.IsLoading || lm.SummaryHold)) return;
+            uint clock = Clock;
+            if (CountdownBeats.IsStale(countdownGoTick, clock)) { countdownActive = false; return; }
+            int b = CountdownBeats.CurrentBeat(countdownGoTick, clock);
+            if (b >= lastShownBeat) return;
+            lastShownBeat = b;
+            var tint = PlayerIdentity.ColorOf(countdownSender);
+            if (b > 0)
+            {
+                CalloutBubble.Show(b == 3 ? "3" : b == 2 ? "2" : "1", tint, 0.45f);
+                AudioManager.Instance?.PlayCountBeat();
+            }
+            else
+            {
+                CalloutBubble.Show("GO!", tint, 0.8f, popScale: 1.25f);
+                AudioManager.Instance?.PlayCountGo();
+                countdownActive = false;
+            }
         }
 
         // In play, unobstructed, with a character to anchor the bubble to. SimGated covers loading, the
@@ -134,6 +180,66 @@ namespace JumpNowBro.Networking
         {
             if (!CanReceiveComms) return;
             ShowCallout(RemoteOwner, id);
+        }
+
+        void TrySendCountdown()
+        {
+            if (!CanSendComms || Time.unscaledTime < nextKeySendTime) return;
+            nextKeySendTime = Time.unscaledTime + SendCooldown;
+            uint goTick = CountdownBeats.GoTick(Clock, (uint)Lead());
+            AdoptCountdown(goTick, LocalOwner);
+            // Always send, adopted locally or not: the receiver applies the same predicate, so both ends
+            // converge either way, and the unconditional send is the deterministic choice.
+            NetworkManager.Instance?.SendCountdownEvent(goTick);
+        }
+
+        public void ReceiveCountdown(uint goTick)
+        {
+            if (!CanReceiveComms) return;
+            AdoptCountdown(goTick, RemoteOwner);
+        }
+
+        // Newest-GO-wins with the P1 tie-break. The incomingIsFromP1 flag is about the ORIGINATING sender,
+        // so a local press on the host passes true and one on the client passes false — hardcoding the
+        // receive-direction constants here would let an equal-tick race diverge the two screens' tints.
+        void AdoptCountdown(uint goTick, InputOwner sender)
+        {
+            if (countdownActive && !CountdownBeats.ShouldReplace(countdownGoTick, goTick, sender == InputOwner.P1))
+                return;
+            countdownActive = true;
+            countdownGoTick = goTick;
+            countdownSender = sender;
+            lastShownBeat = CountdownBeats.BeatCount + 1;   // the driver shows whatever beat is current next tick
+        }
+
+        void CancelCountdown()
+        {
+            if (!countdownActive) return;
+            countdownActive = false;
+            if (lastShownBeat <= CountdownBeats.BeatCount) CalloutBubble.HideImmediate();   // a beat is on screen
+        }
+
+        // The shared clock (SwapScheduleDriver.CurrentApplyClock, copied): the host measures goTick against
+        // its last-consumed client tick, the client and solo against the local TickClock.
+        uint Clock
+        {
+            get
+            {
+                var nm = NetworkManager.Instance;
+                if (nm != null && nm.Role == GameRole.Hosting) return nm.HostConsumedClientTick;
+                return TickClock.Instance != null ? TickClock.Instance.Current : 0u;
+            }
+        }
+
+        // SwapScheduleDriver's lead formula applied on BOTH roles — either end originates a countdown, and
+        // CurrentRtt is fed by PING/PONG on the client too. Solo reads 0 RTT and takes the base lead.
+        int Lead()
+        {
+            int lead = BaseLeadTicks;
+            var nm = NetworkManager.Instance;
+            if (nm != null && nm.Role != GameRole.SinglePlayer)
+                lead = Mathf.Max(lead, Mathf.CeilToInt(nm.CurrentRtt / Time.fixedDeltaTime) + 2);
+            return Mathf.Clamp(lead, LeadFloor, LeadCap);
         }
 
         static void ShowCallout(InputOwner sender, CalloutId id)
