@@ -10,9 +10,11 @@ namespace JumpNowBro.Networking
     public static class SessionProtocol
     {
         public const uint Magic = 0x4A4E4252;   // 'J' 'N' 'B' 'R'
-        public const ushort Version = 4;         // v4: RunSummary EVENT kind (#130) — a v3 peer would drop the summary and
-                                                 // keep simming through the host's hold, so version skew fails at the
-                                                 // handshake instead. (v3: lobby kinds, #142. v2: name+colour, #114/#125.)
+        public const ushort Version = 5;         // v5: comms EVENT kinds — Callout/WorldPing/Countdown (#131). A v4 peer's
+                                                 // read boundary rejects kind > 6, silently dropping every comms EVENT and
+                                                 // leaving the signals one-sided, so version skew fails at the handshake
+                                                 // instead. (v4: RunSummary, #130. v3: lobby kinds, #142. v2: name+colour,
+                                                 // #114/#125.)
 
         /// Validate a raw inbound datagram as a well-formed, current-version HELLO — used by the host's
         /// listen phase before it commits to a peer. HELLO rides the reliable channel, so its body sits

@@ -373,6 +373,9 @@ namespace JumpNowBro.Tests
             Assert.LessOrEqual(EventBody.Death(1u, ControlMap.Default).Write(buf), EventBody.MaxSize);
             Assert.LessOrEqual(EventBody.LobbyReady(true).Write(buf), EventBody.MaxSize);
             Assert.LessOrEqual(EventBody.LobbyState(0).Write(buf), EventBody.MaxSize);
+            Assert.LessOrEqual(EventBody.Callout(CalloutId.Wait).Write(buf), EventBody.MaxSize);
+            Assert.LessOrEqual(EventBody.WorldPing(1f, 1f).Write(buf), EventBody.MaxSize);
+            Assert.LessOrEqual(EventBody.Countdown(1u).Write(buf), EventBody.MaxSize);
         }
 
         [Test]
@@ -380,8 +383,8 @@ namespace JumpNowBro.Tests
         {
             // Kind = 99: outside the defined enum range.
             Assert.IsFalse(EventBody.TryRead(new byte[] { 99, 0 }, out _));
-            // And the exact boundary: one past the last defined kind (RunSummary = 6).
-            Assert.IsFalse(EventBody.TryRead(new byte[] { 7, 0 }, out _));
+            // And the exact boundary: one past the last defined kind (Countdown = 9).
+            Assert.IsFalse(EventBody.TryRead(new byte[] { 10, 0 }, out _));
         }
 
         [Test]
@@ -440,6 +443,108 @@ namespace JumpNowBro.Tests
         {
             // map dashOwner byte = 7 (not in {P1=0, P2=1}) -> ControlMap.TryUnpack rejects.
             Assert.IsFalse(EventBody.TryRead(new byte[] { (byte)EventKind.Swap, 0, 0, 0, 1, 0, 0, 7, 5 }, out _));
+        }
+
+        // ---------- v2.5 comms kinds (#150) ----------
+
+        [Test]
+        public void EventBody_Callout_RoundTrip()
+        {
+            var buf = new byte[EventBody.MaxSize];
+            foreach (CalloutId id in new[] { CalloutId.Wait, CalloutId.Sorry, CalloutId.Nice })
+            {
+                int n = EventBody.Callout(id).Write(buf);
+                Assert.AreEqual(2, n);                           // kind + callout id
+                Assert.IsTrue(EventBody.TryRead(buf.AsSpan(0, n), out var rt));
+                Assert.AreEqual(EventKind.Callout, rt.kind);
+                Assert.AreEqual((byte)id, rt.calloutId);
+            }
+        }
+
+        [Test]
+        public void EventBody_CalloutIdOutOfRange_Rejected()
+        {
+            // One past the last defined callout id (Nice = 2) — strict like the LobbyReady flag.
+            Assert.IsFalse(EventBody.TryRead(new byte[] { (byte)EventKind.Callout, EventBody.CalloutIdCount }, out _));
+        }
+
+        [Test]
+        public void EventBody_CalloutTruncated_Rejected()
+        {
+            Assert.IsFalse(EventBody.TryRead(new byte[1] { (byte)EventKind.Callout }, out _));
+        }
+
+        [Test]
+        public void EventBody_WorldPing_RoundTrip()
+        {
+            var buf = new byte[EventBody.MaxSize];
+            int n = EventBody.WorldPing(-12.5f, 7.25f).Write(buf);
+            Assert.AreEqual(1 + 4 + 4, n);                       // kind + x + y
+            Assert.IsTrue(EventBody.TryRead(buf.AsSpan(0, n), out var rt));
+            Assert.AreEqual(EventKind.WorldPing, rt.kind);
+            Assert.AreEqual(-12.5f, rt.pingX);                   // bit-exact through the big-endian round-trip
+            Assert.AreEqual(7.25f, rt.pingY);
+        }
+
+        [Test]
+        public void EventBody_WorldPingNonFinite_Rejected()
+        {
+            // Direct struct init bypasses the clamping factory, so the NaN/Inf bits actually hit the wire.
+            var buf = new byte[EventBody.MaxSize];
+            int n = new EventBody { kind = EventKind.WorldPing, pingX = float.NaN, pingY = 0f }.Write(buf);
+            Assert.IsFalse(EventBody.TryRead(buf.AsSpan(0, n), out _));
+            n = new EventBody { kind = EventKind.WorldPing, pingX = 0f, pingY = float.PositiveInfinity }.Write(buf);
+            Assert.IsFalse(EventBody.TryRead(buf.AsSpan(0, n), out _));
+        }
+
+        [Test]
+        public void EventBody_WorldPingOutOfWorldRange_Rejected()
+        {
+            // Finite but absurd (> ±4096): a legit sender can never produce it (factory clamps), so it's malformed.
+            var buf = new byte[EventBody.MaxSize];
+            int n = new EventBody { kind = EventKind.WorldPing, pingX = 5000f, pingY = 0f }.Write(buf);
+            Assert.IsFalse(EventBody.TryRead(buf.AsSpan(0, n), out _));
+        }
+
+        [Test]
+        public void EventBody_WorldPingTruncated_Rejected()
+        {
+            var buf = new byte[EventBody.MaxSize];
+            int n = EventBody.WorldPing(1f, 2f).Write(buf);
+            Assert.IsFalse(EventBody.TryRead(buf.AsSpan(0, n - 1), out _));   // 8 of 9 bytes
+        }
+
+        [Test]
+        public void EventBody_WorldPing_FactoryClampsAtWireBoundary()
+        {
+            var buf = new byte[EventBody.MaxSize];
+            int n = EventBody.WorldPing(1e30f, -1e30f).Write(buf);
+            Assert.IsTrue(EventBody.TryRead(buf.AsSpan(0, n), out var rt));
+            Assert.AreEqual(4096f, rt.pingX);
+            Assert.AreEqual(-4096f, rt.pingY);
+            n = EventBody.WorldPing(float.NaN, 3f).Write(buf);
+            Assert.IsTrue(EventBody.TryRead(buf.AsSpan(0, n), out rt));
+            Assert.AreEqual(0f, rt.pingX);                       // NaN squashes to origin, never rejected post-factory
+            Assert.AreEqual(3f, rt.pingY);
+        }
+
+        [Test]
+        public void EventBody_Countdown_RoundTrip()
+        {
+            var buf = new byte[EventBody.MaxSize];
+            int n = EventBody.Countdown(4_000_000_000u).Write(buf);   // high u32: survives as unsigned
+            Assert.AreEqual(1 + 4, n);                           // kind + goTick
+            Assert.IsTrue(EventBody.TryRead(buf.AsSpan(0, n), out var rt));
+            Assert.AreEqual(EventKind.Countdown, rt.kind);
+            Assert.AreEqual(4_000_000_000u, rt.tick);
+        }
+
+        [Test]
+        public void EventBody_CountdownTruncated_Rejected()
+        {
+            var buf = new byte[EventBody.MaxSize];
+            int n = EventBody.Countdown(77u).Write(buf);
+            Assert.IsFalse(EventBody.TryRead(buf.AsSpan(0, n - 1), out _));
         }
 
         // ---------- Fuzz: no wire reader throws on garbage ----------

@@ -88,8 +88,10 @@ namespace JumpNowBro.Networking
     }
 
     /// EVENT.kind discriminator. LevelLoad/Swap/Death/LobbyState/RunSummary flow host → client; LevelReady
-    /// (the load-barrier ack) and LobbyReady (the pre-game ready toggle) flow client → host. The body shape
-    /// differs per kind — see EventBody.
+    /// (the load-barrier ack) and LobbyReady (the pre-game ready toggle) flow client → host. The comms kinds
+    /// (Callout/WorldPing/Countdown) are the first to flow BOTH ways — the receive direction identifies the
+    /// sender (a client only ever receives from the host, P1; the host only from the client, P2), so the
+    /// wire carries no sender byte. The body shape differs per kind — see EventBody.
     public enum EventKind : byte
     {
         LevelLoad  = 0,
@@ -99,7 +101,13 @@ namespace JumpNowBro.Networking
         LobbyReady = 4,    // client → host: 1-byte ready flag (v2.3 lobby)
         LobbyState = 5,    // host → client: 1-byte selected level, so the client's lobby shows the pick
         RunSummary = 6,    // host → client: the completed level's run stats, sent at goal touch (#130)
+        Callout    = 7,    // both ways: 1-byte canned callout id (v2.5 comms, #131)
+        WorldPing  = 8,    // both ways: world-position marker, x/y f32 ("World" — MessageType.Ping is transport RTT)
+        Countdown  = 9,    // both ways: synced 3-2-1-GO; u32 GO-beat tick (client input-tick)
     }
+
+    /// Canned callouts (keys 2/3/4). GO is deliberately absent — key 1 always sends Countdown (#131).
+    public enum CalloutId : byte { Wait = 0, Sorry = 1, Nice = 2 }
 
     /// EVENT body (reliable channel). A discriminated union keyed on `kind`; each variant validates its own
     /// length on read. apply_at_tick is a CLIENT input-tick (the one coordinate both ends agree on — see
@@ -109,7 +117,7 @@ namespace JumpNowBro.Networking
     {
         public EventKind kind;
         public byte sceneIndex;     // LevelLoad / LevelReady / LobbyState (selected level) / RunSummary (completed level)
-        public uint tick;           // Swap: apply_at_tick · Death: deathTick (both client input-ticks)
+        public uint tick;           // Swap: apply_at_tick · Death: deathTick · Countdown: GO-beat tick (all client input-ticks)
         public ControlMap map;      // Swap: new absolute map · Death: checkpoint map to restore
         public byte triggerId;      // Swap: which physical SwapTrigger fired (client banner targeting)
         public byte ready;          // LobbyReady: 0|1 (strict on read, like ControlMap owners)
@@ -117,6 +125,8 @@ namespace JumpNowBro.Networking
         public ushort deaths;       // RunSummary
         public ushort swaps;        // RunSummary
         public uint streakMs;       // RunSummary: longest deathless span
+        public byte calloutId;      // Callout: CalloutId (range-checked on read)
+        public float pingX, pingY;  // WorldPing: world position (factory clamps to ±4096; read rejects outside)
 
         // Largest variant (RunSummary) bounds the send scratch buffer; variants write fewer bytes.
         public const int MaxSize = 1 + 1 + 4 + 2 + 2 + 4;   // = 14
@@ -143,8 +153,22 @@ namespace JumpNowBro.Networking
                 streakMs = ClampMs(stats.streakMs),
             };
 
+        public static EventBody Callout(CalloutId id) =>
+            new EventBody { kind = EventKind.Callout, calloutId = (byte)id };
+        /// Clamps at the wire boundary: NaN/±Inf and absurd coordinates never leave this machine
+        /// (levels span a few dozen units; ±4096 is generous).
+        public static EventBody WorldPing(float x, float y) =>
+            new EventBody { kind = EventKind.WorldPing, pingX = ClampWorld(x), pingY = ClampWorld(y) };
+        public static EventBody Countdown(uint goTick) =>
+            new EventBody { kind = EventKind.Countdown, tick = goTick };
+
+        public const byte CalloutIdCount = 3;    // one past CalloutId.Nice — the read-side range check
+        const float MaxWorldCoord = 4096f;
+
         static ushort ClampU16(int v) => v < 0 ? (ushort)0 : v > ushort.MaxValue ? ushort.MaxValue : (ushort)v;
         static uint ClampMs(int v) => v < 0 ? 0u : (uint)v;
+        static float ClampWorld(float v) =>
+            float.IsNaN(v) ? 0f : v < -MaxWorldCoord ? -MaxWorldCoord : v > MaxWorldCoord ? MaxWorldCoord : v;
 
         public int Write(Span<byte> dst)
         {
@@ -178,6 +202,16 @@ namespace JumpNowBro.Networking
                     w.WriteUShort(swaps);
                     w.WriteUInt(streakMs);
                     break;
+                case EventKind.Callout:
+                    w.WriteByte(calloutId);
+                    break;
+                case EventKind.WorldPing:
+                    w.WriteFloat(pingX);
+                    w.WriteFloat(pingY);
+                    break;
+                case EventKind.Countdown:
+                    w.WriteUInt(tick);
+                    break;
             }
             return w.Position;
         }
@@ -187,7 +221,7 @@ namespace JumpNowBro.Networking
             body = default;
             var r = new ByteReader(src);
             if (!r.TryReadByte(out var k)) return false;
-            if (k > (byte)EventKind.RunSummary) return false;          // reject kinds we don't define
+            if (k > (byte)EventKind.Countdown) return false;           // reject kinds we don't define
             body.kind = (EventKind)k;
             switch (body.kind)
             {
@@ -213,6 +247,18 @@ namespace JumpNowBro.Networking
                     if (!r.TryReadUShort(out body.deaths)) return false;
                     if (!r.TryReadUShort(out body.swaps)) return false;
                     return r.TryReadUInt(out body.streakMs);
+                case EventKind.Callout:
+                    if (!r.TryReadByte(out body.calloutId)) return false;
+                    return body.calloutId < CalloutIdCount;            // strict, like LobbyReady's flag
+                case EventKind.WorldPing:
+                    if (!r.TryReadFloat(out body.pingX)) return false;
+                    if (!r.TryReadFloat(out body.pingY)) return false;
+                    // The range compare also rejects NaN (NaN fails every comparison) — mirrors ClampWorld,
+                    // so a legit sender always passes and anything outside is malformed.
+                    return body.pingX >= -MaxWorldCoord && body.pingX <= MaxWorldCoord
+                        && body.pingY >= -MaxWorldCoord && body.pingY <= MaxWorldCoord;
+                case EventKind.Countdown:
+                    return r.TryReadUInt(out body.tick);               // any u32 — wrap-safe compares handle "past"
             }
             return false;
         }
