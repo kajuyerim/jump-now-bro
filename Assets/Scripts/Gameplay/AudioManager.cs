@@ -32,6 +32,10 @@ namespace JumpNowBro.Gameplay
         [SerializeField] AudioClip landClip;
         [SerializeField] AudioClip dashClip;
         [SerializeField] AudioClip swapClip;
+        [SerializeField] AudioClip calloutClip;      // v2.5 comms (#151): WAIT/SORRY/NICE pop
+        [SerializeField] AudioClip pingClip;         // v2.5 comms: location ping
+        [SerializeField] AudioClip countBeatClip;    // v2.5 comms: 3/2/1 beat
+        [SerializeField] AudioClip countGoClip;      // v2.5 comms: the GO beat
 
         [Header("Music (assign in the Inspector)")]
         [SerializeField] AudioClip musicClip;
@@ -129,6 +133,10 @@ namespace JumpNowBro.Gameplay
         public void PlayLand() => Play(landClip);
         public void PlayDash() => Play(dashClip);
         public void PlaySwap() => Play(swapClip);
+        public void PlayCallout()   => Play(calloutClip);     // v2.5 comms (#151); Play() no-ops until assigned
+        public void PlayPing()      => Play(pingClip);
+        public void PlayCountBeat() => Play(countBeatClip);
+        public void PlayCountGo()   => Play(countGoClip);
 
         // PlayOneShot so overlapping triggers (e.g. a dash landing into a swap) layer instead of cutting each other.
         // Mixer-routed: play at unity and let the SFX bus attenuate. No mixer: scale by sfxVolume (and master mute) here.

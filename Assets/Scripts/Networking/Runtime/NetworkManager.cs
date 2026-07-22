@@ -431,6 +431,15 @@ namespace JumpNowBro.Networking
         // role handles only the kinds it should receive and ignores the rest (D11). LevelReady/Death land later.
         void DispatchEvent(in EventBody ev)
         {
+            // v2.5 comms kinds flow BOTH ways (#131) — the receive direction identifies the sender, so they
+            // dispatch before the role split. Grows per feature: Callout (#151), Countdown (#152), WorldPing (#153).
+            switch (ev.kind)
+            {
+                case EventKind.Callout:
+                    CommsController.Instance?.ReceiveCallout((CalloutId)ev.calloutId);
+                    return;
+            }
+
             if (Role == GameRole.Client)
             {
                 switch (ev.kind)
@@ -530,6 +539,7 @@ namespace JumpNowBro.Networking
             lm?.ResetIndex();                                            // index < 0 -> InLobby true, lobby shows
             if (lm != null) lm.SimPaused = false;
             RunSummaryController.Instance?.ResetAll();                   // #130: a partner Leave mid-hold ends the run — clear hold + totals
+            CommsController.Instance?.ResetAll();                        // #131: comms are transient — none survive the run they were about
             CompleteScreen.Instance?.HidePanel();
             FindAnyObjectByType<LevelHud>()?.Clear();
             DeathNotifier.Instance?.Reset();
@@ -600,6 +610,31 @@ namespace JumpNowBro.Networking
             transport.Send(Channel.Reliable, MessageType.Event, new ReadOnlySpan<byte>(eventSendScratch, 0, n));
         }
 
+        // ---- v2.5 comms sends (#131): the first symmetric EVENTs. transport-null guard ONLY — both roles
+        // originate, solo no-ops on the null transport, and per the SendDeathEvent precedent there is no
+        // Established check (the reliable queue owns delivery). CommsController owns the gates + cooldown. ----
+
+        public void SendCalloutEvent(CalloutId id)
+        {
+            if (transport == null) return;
+            int n = EventBody.Callout(id).Write(eventSendScratch);
+            transport.Send(Channel.Reliable, MessageType.Event, new ReadOnlySpan<byte>(eventSendScratch, 0, n));
+        }
+
+        public void SendWorldPingEvent(float x, float y)
+        {
+            if (transport == null) return;
+            int n = EventBody.WorldPing(x, y).Write(eventSendScratch);
+            transport.Send(Channel.Reliable, MessageType.Event, new ReadOnlySpan<byte>(eventSendScratch, 0, n));
+        }
+
+        public void SendCountdownEvent(uint goTick)
+        {
+            if (transport == null) return;
+            int n = EventBody.Countdown(goTick).Write(eventSendScratch);
+            transport.Send(Channel.Reliable, MessageType.Event, new ReadOnlySpan<byte>(eventSendScratch, 0, n));
+        }
+
         // ---- shared ----
 
         void OnSessionStateChanged(Session.SessionState state)
@@ -662,6 +697,7 @@ namespace JumpNowBro.Networking
                 connectionLost = true;
                 lostReason = reason;
                 if (LevelManager.Instance != null) LevelManager.Instance.SimPaused = true;
+                CommsController.Instance?.ResetAll();   // #131: no bubble/ping/beat may keep firing under the lost overlay
             }
             if (Role == GameRole.Hosting)
             {
@@ -764,6 +800,7 @@ namespace JumpNowBro.Networking
             // #130: drop a stale hold (it would freeze the reloaded level) but KEEP totals + the accounting
             // latch — this client resumes the same run, and the host re-sends the summary if still holding.
             RunSummaryController.Instance?.HideAndRelease();
+            CommsController.Instance?.ResetAll();                        // #131: stale comms have no place in the reloaded level
             LevelManager.Instance?.ResetIndex();
             discovery?.Dispose(); discovery = null;
             gameplaySocket?.Dispose(); gameplaySocket = null;            // dispose the stale socket before BeginClient opens a new one
@@ -809,6 +846,7 @@ namespace JumpNowBro.Networking
             // raced the next load (see LevelManager.ResetIndex); the next session's load clears it. DeathNotifier
             // is zeroed silently (no OnDeath) so the next session's HUD starts at 0 without a teardown shake.
             RunSummaryController.Instance?.ResetAll();                         // #130: hold + card + run totals end with the session
+            CommsController.Instance?.ResetAll();                              // #131: comms end with the session too
             CompleteScreen.Instance?.HidePanel();
             FindAnyObjectByType<LevelHud>()?.Clear();
             DeathNotifier.Instance?.Reset();
