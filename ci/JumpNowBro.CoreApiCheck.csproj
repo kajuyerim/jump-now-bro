@@ -5,6 +5,10 @@
     the API/language surface Unity 6 uses — to catch net8.0-only calls before they reach the editor.
     Compile-only (NS2.1 is a library contract, not a runnable runtime); the net8.0 CoreTests project
     runs the actual tests. Networking/Runtime/** (UnityEngine) is excluded, same as CoreTests.
+
+    The EditMode tests are compiled here too: CoreTests builds them at LangVersion latest on net8.0,
+    so without this glob a test could use an API or syntax Unity rejects, pass CI green, and only fail
+    inside the editor. NUnit is referenced for that glob alone (it targets netstandard2.0).
   -->
   <PropertyGroup>
     <TargetFramework>netstandard2.1</TargetFramework>
@@ -14,9 +18,14 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="NUnit" Version="3.14.0" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Compile Include="../Assets/Scripts/Util/**/*.cs" />
     <Compile Include="../Assets/Scripts/Networking/**/*.cs"
              Exclude="../Assets/Scripts/Networking/Runtime/**/*.cs" />
+    <Compile Include="../Assets/Scripts/Tests/EditMode/**/*.cs" />
   </ItemGroup>
 
 </Project>
