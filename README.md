@@ -192,4 +192,12 @@ two-machine LAN.
 
 ## License
 
-No license, private project for academic submission.
+Copyright (c) 2026 Kerem Haktan Kurt. **All rights reserved.** This repository is
+public for portfolio inspection; it is not offered under an open-source licence.
+See [LICENSE](LICENSE) for the applicable terms. This change does not revoke MIT
+rights already granted for earlier versions, whose licence remains in Git history.
+
+Bundled third-party material retains its own terms; see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Player builds include the notices
+and font licences under `StreamingAssets/Legal`. The audio provenance/replacement
+items listed in the notices remain unresolved before release.

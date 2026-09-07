@@ -1,16 +1,19 @@
-MIT License
-
 Copyright (c) 2026 Kerem Haktan Kurt
+All rights reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+This notice applies to the project-owned source code, assets, and documentation
+of Jump Now Bro! Third-party components remain subject to their respective
+licences; see THIRD_PARTY_NOTICES.md and the accompanying licence files.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+The source is publicly available for inspection as a portfolio project.
+Public availability does not grant a licence to use, modify, redistribute,
+sublicense, or sell the project-owned material. Such uses require prior written
+permission from the copyright holder, except to the extent permitted by
+applicable law, GitHub's Terms of Service, or a separate licence or agreement.
+
+This notice does not restrict the rights granted by third-party licences or
+revoke any rights already granted under the MIT licence for earlier versions
+of this project. The original licence remains in Git history with those versions.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
