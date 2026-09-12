@@ -160,6 +160,25 @@ namespace JumpNowBro.Tests
         }
 
         [Test]
+        public void Coyote_WithSpentDash_JumpDoesNotRefundOrLand()
+        {
+            var t = DefaultTuning();
+            var w = new ConfigurableGroundWorld { isGrounded = false };
+            var s = GroundedAtOrigin();
+            s.dashChargeAvailable = false;
+
+            (s, _) = Movement.Step(s, new EffectiveInput(), t, Dt, w);
+            Assert.AreEqual(MoveState.Falling, s.state);
+            Assert.That(s.coyoteTimer, Is.GreaterThan(0f));
+
+            EdgeFlags edges; (s, edges) = Movement.Step(s, new EffectiveInput { jumpPressed = true }, t, Dt, w);
+
+            Assert.AreEqual(MoveState.Jumping, s.state);
+            Assert.AreEqual(EdgeFlags.JumpedThisTick, edges);
+            Assert.IsFalse(s.dashChargeAvailable);
+        }
+
+        [Test]
         public void Coyote_BeyondWindow_JumpDoesNotFire()
         {
             var t = DefaultTuning();
@@ -197,6 +216,46 @@ namespace JumpNowBro.Tests
             w.isGrounded = true;
             (s, _) = Movement.Step(s, new EffectiveInput(), t, Dt, w);
             Assert.AreEqual(MoveState.Jumping, s.state);
+        }
+
+        [Test]
+        public void JumpBuffer_AfterDash_LandingRefundsAndAllowsNextAirDash()
+        {
+            var t = DefaultTuning();
+            var w = new ConfigurableGroundWorld { isGrounded = false };
+            var s = new MovementState { state = MoveState.Falling, facing = 1, dashChargeAvailable = true, posY = 5f };
+
+            EdgeFlags edges; (s, edges) = Movement.Step(s, new EffectiveInput { dashPressed = true }, t, Dt, w);
+            Assert.AreEqual(MoveState.Dashing, s.state);
+            Assert.AreEqual(EdgeFlags.DashedThisTick, edges);
+            Assert.IsFalse(s.dashChargeAvailable);
+
+            for (int i = 0; i < 30 && s.state == MoveState.Dashing; i++)
+                (s, _) = Movement.Step(s, new EffectiveInput(), t, Dt, w);
+            Assert.AreEqual(MoveState.Falling, s.state);
+            Assert.IsFalse(s.dashChargeAvailable);
+
+            (s, edges) = Movement.Step(s, new EffectiveInput { jumpPressed = true, jumpHeld = true }, t, Dt, w);
+            Assert.AreEqual(MoveState.Falling, s.state);
+            Assert.AreEqual(EdgeFlags.None, edges);
+            Assert.That(s.jumpBufferTimer, Is.GreaterThan(Dt));
+
+            float landingY = s.posY;
+            w.isGrounded = true;
+            (s, edges) = Movement.Step(s, new EffectiveInput { jumpHeld = true }, t, Dt, w);
+
+            Assert.AreEqual(MoveState.Jumping, s.state);
+            Assert.IsTrue(s.dashChargeAvailable);
+            Assert.AreEqual(EdgeFlags.LandedThisTick | EdgeFlags.JumpedThisTick, edges);
+            Assert.AreEqual(0f, s.jumpBufferTimer);
+            Assert.That(s.velY, Is.EqualTo(t.jumpVelocity - t.gravity * Dt).Within(0.01f));
+            Assert.That(s.posY, Is.GreaterThan(landingY));
+
+            w.isGrounded = false;
+            (s, edges) = Movement.Step(s, new EffectiveInput { dashPressed = true, jumpHeld = true }, t, Dt, w);
+            Assert.AreEqual(MoveState.Dashing, s.state);
+            Assert.AreEqual(EdgeFlags.DashedThisTick, edges);
+            Assert.IsFalse(s.dashChargeAvailable);
         }
 
         // ---- Dash ----
@@ -239,6 +298,32 @@ namespace JumpNowBro.Tests
             Assert.AreEqual(MoveState.Grounded, s.state);
             Assert.IsTrue(s.dashChargeAvailable);
             Assert.AreNotEqual(EdgeFlags.None, edges & EdgeFlags.LandedThisTick);
+
+            (s, edges) = Movement.Step(s, new EffectiveInput(), t, Dt, w);
+            Assert.AreEqual(MoveState.Grounded, s.state);
+            Assert.IsTrue(s.dashChargeAvailable);
+            Assert.AreEqual(EdgeFlags.None, edges);
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void Dash_OnLanding_UsesRefundBeforeBufferedJump(bool bufferJump)
+        {
+            var t = DefaultTuning();
+            var w = new ConfigurableGroundWorld { isGrounded = false };
+            var s = new MovementState { state = MoveState.Falling, facing = 1, dashChargeAvailable = false, posY = 5f };
+
+            (s, _) = Movement.Step(s, new EffectiveInput { jumpPressed = bufferJump, jumpHeld = bufferJump }, t, Dt, w);
+            Assert.AreEqual(MoveState.Falling, s.state);
+            Assert.IsFalse(s.dashChargeAvailable);
+            if (bufferJump) Assert.That(s.jumpBufferTimer, Is.GreaterThan(Dt));
+
+            w.isGrounded = true;
+            EdgeFlags edges; (s, edges) = Movement.Step(s, new EffectiveInput { dashPressed = true, jumpHeld = bufferJump }, t, Dt, w);
+
+            Assert.AreEqual(MoveState.Dashing, s.state);
+            Assert.AreEqual(EdgeFlags.LandedThisTick | EdgeFlags.DashedThisTick, edges);
+            Assert.IsFalse(s.dashChargeAvailable);
         }
 
         // ---- Fall limit ----

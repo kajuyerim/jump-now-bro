@@ -63,14 +63,14 @@ namespace JumpNowBro.Util
                     break;
 
                 case MoveState.Falling:
-                    if (input.dashPressed && s.dashChargeAvailable) FireDash(ref s, t, ref edges);
-                    else if (jumpAllowed) FireJump(ref s, t, ref edges);
-                    else if (grounded)
+                    if (grounded)
                     {
                         s.state = MoveState.Grounded;
                         s.dashChargeAvailable = true;                                    // refund dash charge on land (line 147)
                         edges |= EdgeFlags.LandedThisTick;
                     }
+                    if (input.dashPressed && s.dashChargeAvailable) FireDash(ref s, t, ref edges);
+                    else if (jumpAllowed) FireJump(ref s, t, ref edges);
                     break;
 
                 case MoveState.Dashing:
