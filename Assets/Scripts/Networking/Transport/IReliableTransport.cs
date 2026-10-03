@@ -7,9 +7,9 @@ namespace JumpNowBro.Networking
     /// Wire message types; channel discipline and send rates are in DESIGN §8.
     public enum MessageType : byte
     {
-        Hello, Welcome, Goodbye,
-        Input, State, Event,
-        Ping, Pong
+        Hello = 0, Welcome = 1, Goodbye = 2,
+        Input = 3, State = 4, Event = 5,
+        Ping = 6, Pong = 7
     }
 
     /// Boundary between the transport (sockets, seq/ack, RTT, retransmit) and the application

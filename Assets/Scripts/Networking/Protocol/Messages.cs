@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using JumpNowBro.Util;
 
 namespace JumpNowBro.Networking
@@ -115,6 +116,8 @@ namespace JumpNowBro.Networking
     /// client when its TickClock does.
     public struct EventBody
     {
+        static readonly HashSet<EventKind> KnownKinds = new HashSet<EventKind>((EventKind[])Enum.GetValues(typeof(EventKind)));
+
         public EventKind kind;
         public byte sceneIndex;     // LevelLoad / LevelReady / LobbyState (selected level) / RunSummary (completed level)
         public uint tick;           // Swap: apply_at_tick · Death: deathTick · Countdown: GO-beat tick (all client input-ticks)
@@ -221,7 +224,7 @@ namespace JumpNowBro.Networking
             body = default;
             var r = new ByteReader(src);
             if (!r.TryReadByte(out var k)) return false;
-            if (k > (byte)EventKind.Countdown) return false;           // reject kinds we don't define
+            if (!KnownKinds.Contains((EventKind)k)) return false;
             body.kind = (EventKind)k;
             switch (body.kind)
             {
