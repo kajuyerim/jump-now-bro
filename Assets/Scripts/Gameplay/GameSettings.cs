@@ -32,7 +32,6 @@ namespace JumpNowBro.Gameplay
         public static bool  Muted        => PlayerPrefs.GetInt(KMuted, 0) != 0;
         public static bool  Fullscreen   => PlayerPrefs.GetInt(KFullscreen, 1) != 0;
         public static bool  VSync        => PlayerPrefs.GetInt(KVSync, 1) != 0;
-        public static bool  HasAudioPrefs => PlayerPrefs.HasKey(KMaster);
 
         // ---- audio (live-applied through AudioManager's mixer API) ----
         public static void SetMasterVolume(float v) { v = Mathf.Clamp01(v); PlayerPrefs.SetFloat(KMaster, v); AudioManager.Instance?.SetMasterVolume(v); }
@@ -40,15 +39,15 @@ namespace JumpNowBro.Gameplay
         public static void SetSFXVolume(float v)    { v = Mathf.Clamp01(v); PlayerPrefs.SetFloat(KSFX, v);    AudioManager.Instance?.SetSFXVolume(v); }
         public static void SetMuted(bool m)         { PlayerPrefs.SetInt(KMuted, m ? 1 : 0); AudioManager.Instance?.SetMuted(m); }
 
-        /// Push the stored (or default) audio levels into the AudioManager. Called from AudioManager.Start so a
-        /// saved profile is restored on launch; if nothing's saved the defaults above reproduce the old behaviour.
+        /// Push stored audio levels into the AudioManager. Each key is optional so older or partially edited
+        /// profiles keep the AudioManager's serialized default for values that were never saved.
         public static void ApplyAudio(AudioManager am)
         {
             if (am == null) return;
-            am.SetMasterVolume(MasterVolume);
-            am.SetMusicVolume(MusicVolume);
-            am.SetSFXVolume(SFXVolume);
-            am.SetMuted(Muted);
+            am.SetMasterVolume(PlayerPrefs.GetFloat(KMaster, am.MasterVolume));
+            am.SetMusicVolume(PlayerPrefs.GetFloat(KMusic, am.MusicVolume));
+            am.SetSFXVolume(PlayerPrefs.GetFloat(KSFX, am.SFXVolume));
+            am.SetMuted(PlayerPrefs.GetInt(KMuted, am.Muted ? 1 : 0) != 0);
         }
 
         // ---- display (live-applied to Screen / QualitySettings) ----
