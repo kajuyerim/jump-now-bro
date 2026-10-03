@@ -172,6 +172,42 @@ namespace JumpNowBro.Tests
             Assert.IsFalse(MovementState.TryUnpack(buf, out _));
         }
 
+        [Test]
+        public void MovementState_InvalidFacing_Rejected()
+        {
+            var buf = new byte[MovementState.PackedSize];
+            MovementState.Pack(SampleState(), buf);
+            buf[33] = 0;                                        // facing must be -1 or +1
+            Assert.IsFalse(MovementState.TryUnpack(buf, out _));
+        }
+
+        [Test]
+        public void MovementState_NegativeFreezeTicks_Rejected()
+        {
+            var buf = new byte[MovementState.PackedSize];
+            MovementState.Pack(SampleState(), buf);
+            buf[34] = 0xFF;                                     // -1 as signed i8; countdown cannot be negative
+            Assert.IsFalse(MovementState.TryUnpack(buf, out _));
+        }
+
+        [Test]
+        public void MovementState_ValidFacingAndFreezeBoundaries_RoundTrip()
+        {
+            foreach (sbyte facing in new sbyte[] { -1, 1 })
+            foreach (sbyte freezeTicks in new sbyte[] { 0, sbyte.MaxValue })
+            {
+                var s = SampleState();
+                s.facing = facing;
+                s.freezeTicksRemaining = freezeTicks;
+                var buf = new byte[MovementState.PackedSize];
+                MovementState.Pack(s, buf);
+
+                Assert.IsTrue(MovementState.TryUnpack(buf, out var rt));
+                Assert.AreEqual(facing, rt.facing);
+                Assert.AreEqual(freezeTicks, rt.freezeTicksRemaining);
+            }
+        }
+
         // ---------- InputBody ----------
 
         [Test]

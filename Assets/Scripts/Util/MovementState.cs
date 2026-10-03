@@ -71,9 +71,13 @@ namespace JumpNowBro.Util
             if (!TryReadFloatBE(src, 24, out s.dashTimer))       return false;
             if (!TryReadFloatBE(src, 28, out s.invulnTimer))     return false;
             if (src[32] > (byte)MoveState.Dashing) return false;       // out-of-range MoveState byte → malformed
+            sbyte facing               = (sbyte)src[33];
+            sbyte freezeTicksRemaining = (sbyte)src[34];
+            if (facing != -1 && facing != 1) return false;             // documented facing is ±1
+            if (freezeTicksRemaining < 0) return false;               // countdown cannot be negative
             s.state                = (MoveState)src[32];
-            s.facing               = (sbyte)src[33];
-            s.freezeTicksRemaining = (sbyte)src[34];
+            s.facing               = facing;
+            s.freezeTicksRemaining = freezeTicksRemaining;
             byte flags             = src[35];
             s.dashChargeAvailable  = (flags & (1 << 0)) != 0;
             s.wasJumpHeld          = (flags & (1 << 1)) != 0;
