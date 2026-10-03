@@ -12,7 +12,7 @@ namespace JumpNowBro.Networking
         struct Msg { public MessageType Type; public byte[] Payload; }
 
         const int MaxBuffered = 256;   // reorder-window guard; unreachable while reliable in-flight is capped far below
-        const int MaxPayloadSize = 512;   // reliable bodies are <= ~24 B; reject a hostile oversized payload outright
+        public const int MaxPayloadSize = 512;   // reliable bodies are <= ~24 B; reject a hostile oversized payload outright
 
         readonly Dictionary<ushort, Msg> buffer = new Dictionary<ushort, Msg>();
 

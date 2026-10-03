@@ -23,7 +23,8 @@ namespace JumpNowBro.Networking
         {
             frames[tick % K] = f;
             uint baseTick = tick >= K - 1 ? tick - (K - 1) : 0u;
-            int count = (int)Math.Min((uint)K, tick + 1u);
+            // Avoid wrapping tick+1 at uint.MaxValue: the final pre-wrap window is still full-sized.
+            int count = tick >= K - 1 ? K : (int)(tick + 1u);
             for (int i = 0; i < count; i++)
                 packed[i] = PlayerInputFrame.Pack(frames[(baseTick + (uint)i) % K]);
             return InputBody.Write(dst, baseTick, packed.AsSpan(0, count));

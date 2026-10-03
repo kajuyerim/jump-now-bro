@@ -49,6 +49,45 @@ namespace JumpNowBro.Tests
         }
 
         [Test]
+        public void HistoryAtAckBitsBoundary_TracksExactlySixteenPrevious()
+        {
+            var acks = new AckSystem();
+            acks.OnReceived(1);
+            acks.OnReceived(17); // seq 1 is exactly 16 positions behind the latest
+
+            acks.GenerateAck(out var ack, out var bits);
+
+            Assert.AreEqual(17, ack);
+            Assert.AreEqual(1 << 15, bits);
+        }
+
+        [Test]
+        public void ForwardGapBeyondInternalHistory_ClearsOldHistory()
+        {
+            var acks = new AckSystem();
+            acks.OnReceived(1);
+            acks.OnReceived(2);
+            acks.OnReceived(35); // shift is 33, beyond the internal history word
+
+            acks.GenerateAck(out var ack, out var bits);
+
+            Assert.AreEqual(35, ack);
+            Assert.AreEqual(0, bits);
+        }
+
+        [Test]
+        public void StaleSequenceBeyondInternalHistory_DoesNotAlterAck()
+        {
+            var acks = new AckSystem();
+            acks.OnReceived(100);
+            acks.OnReceived(67); // 33 behind Latest: outside the uint history word
+            acks.GenerateAck(out var ack, out var bits);
+
+            Assert.AreEqual(100, ack);
+            Assert.AreEqual(0, bits);
+        }
+
+        [Test]
         public void OutOfOrder_FillsBitRetroactively()
         {
             var acks = new AckSystem();

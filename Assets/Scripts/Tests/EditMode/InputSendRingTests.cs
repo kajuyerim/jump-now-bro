@@ -51,6 +51,22 @@ namespace JumpNowBro.Tests
         }
 
         [Test]
+        public void TickMaxValue_WindowStillHasSixFramesAndWrapsBaseTick()
+        {
+            var ring = new InputSendRing();
+            var buf = new byte[InputBody.HeaderSize + InputSendRing.K];
+            uint firstTick = uint.MaxValue - (InputSendRing.K - 1);
+            for (uint tick = firstTick; tick < uint.MaxValue; tick++)
+                ring.Sample(tick, Frame(held: (tick & 1) == 0), buf);
+            int n = ring.Sample(uint.MaxValue, Frame(jump: true), buf);
+
+            Assert.IsTrue(InputBody.TryRead(buf.AsSpan(0, n), out var baseTick, out var count, out var frames));
+            Assert.AreEqual(firstTick, baseTick);
+            Assert.AreEqual(InputSendRing.K, count);
+            Assert.IsTrue(PlayerInputFrame.Unpack(frames[InputSendRing.K - 1]).jumpPressed);
+        }
+
+        [Test]
         public void FramesEmitted_InTickOrder()
         {
             var ring = new InputSendRing();

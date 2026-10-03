@@ -113,5 +113,44 @@ namespace JumpNowBro.Tests
             for (int i = 0; i < 100 && !failed; i++) q.Queue(MessageType.Event, new byte[] { 1 });
             Assert.IsTrue(failed);
         }
+
+        [Test]
+        public void InFlightCap_AllowsExactlySixtyFourMessages()
+        {
+            var q = new ReliableSendQueue();
+            var failed = false;
+            q.OnDeliveryFailed += () => failed = true;
+
+            for (int i = 0; i < 64; i++) q.Queue(MessageType.Event, new byte[] { 1 });
+
+            Assert.IsFalse(failed);
+            Assert.AreEqual(64, q.PendingCount);
+            q.Queue(MessageType.Event, new byte[] { 1 });
+            Assert.IsTrue(failed);
+            Assert.AreEqual(64, q.PendingCount);
+        }
+
+        [Test]
+        public void MessageSequence_WrapsFromMaxToOneWithoutUsingZero()
+        {
+            var q = new ReliableSendQueue();
+            var log = Recorder(out var send);
+
+            for (int i = 0; i < 65534; i++)
+            {
+                q.Queue(MessageType.Event, new byte[] { 1 });
+                q.Tick(i, 0.1f, send);
+                q.OnAck(log[log.Count - 1].Seq);
+            }
+
+            q.Queue(MessageType.Event, new byte[] { 1 });
+            q.Tick(65534, 0.1f, send);
+            Assert.AreEqual(65535, log[log.Count - 1].Seq);
+            q.OnAck(65535);
+
+            q.Queue(MessageType.Event, new byte[] { 1 });
+            q.Tick(65535, 0.1f, send);
+            Assert.AreEqual(1, log[log.Count - 1].Seq);
+        }
     }
 }

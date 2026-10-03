@@ -99,6 +99,37 @@ namespace JumpNowBro.Tests
         }
 
         [Test]
+        public void PayloadAtMaximumAccepted_OneOverMaximumDropped()
+        {
+            var rb = new ReliableReceiveBuffer();
+            rb.Accept(1, MessageType.Event, new byte[512]);
+            Assert.AreEqual(1, rb.BufferedCount);
+            Assert.IsTrue(rb.TryNext(out _, out var payload));
+            Assert.AreEqual(512, payload.Length);
+
+            rb.Accept(2, MessageType.Event, new byte[513]);
+            Assert.AreEqual(0, rb.BufferedCount);
+            Assert.IsFalse(rb.TryNext(out _, out _));
+        }
+
+        [Test]
+        public void ReorderWindow_CapsAtTwoHundredFiftySix_ButAcceptsGapFiller()
+        {
+            var rb = new ReliableReceiveBuffer();
+            for (ushort seq = 2; seq <= 257; seq++)
+                rb.Accept(seq, MessageType.Event, new byte[] { (byte)seq });
+
+            Assert.AreEqual(256, rb.BufferedCount);
+            rb.Accept(258, MessageType.Event, new byte[] { 2 });
+            Assert.AreEqual(256, rb.BufferedCount);
+
+            rb.Accept(1, MessageType.Event, new byte[] { 1 });
+            Assert.IsTrue(rb.TryNext(out _, out var first));
+            Assert.AreEqual(new byte[] { 1 }, first);
+            Assert.AreEqual(256, rb.BufferedCount);
+        }
+
+        [Test]
         public void Wraparound_DeliversAcrossMax_AndDropsPreWrapDup()
         {
             var rb = new ReliableReceiveBuffer();
