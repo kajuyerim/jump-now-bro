@@ -37,7 +37,7 @@ namespace JumpNowBro.Tests
             Assert.AreEqual(new byte[] { 1, 2, 3 }, got);
         }
 
-        [Test]
+        [Test, Timeout(5000)]
         public void Inbound_FromNonPeer_IsDropped()
         {
             using var hostSock = new UdpSocket(0);

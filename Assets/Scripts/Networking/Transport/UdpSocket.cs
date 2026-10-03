@@ -42,6 +42,9 @@ namespace JumpNowBro.Networking
             {
                 client = new UdpClient(new IPEndPoint(IPAddress.Any, bindPort));
             }
+            // Closing a socket from another thread does not reliably interrupt Receive on every platform.
+            // The timeout gives the loop a portable chance to observe running=false during shutdown.
+            client.Client.ReceiveTimeout = 250;
             LocalPort = ((IPEndPoint)client.Client.LocalEndPoint).Port;
 
             running = true;
@@ -96,8 +99,9 @@ namespace JumpNowBro.Networking
             if (disposed) return;
             disposed = true;
             running = false;
-            try { client.Close(); } catch { }           // unblocks the thread's blocking Receive
-            try { receiveThread.Join(500); } catch { }  // bounded wait so Dispose never hangs
+            try { receiveThread.Join(500); } catch { }  // let ReceiveTimeout observe running=false first
+            try { client.Close(); } catch { }           // fallback for a receive still blocked in native code
+            try { receiveThread.Join(500); } catch { }  // final bounded wait for the receive loop to stop
         }
     }
 }
