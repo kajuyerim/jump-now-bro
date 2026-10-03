@@ -7,6 +7,7 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.TestTools;
 using JumpNowBro.Gameplay;
+using JumpNowBro.Networking;
 using JumpNowBro.Util;
 
 namespace JumpNowBro.Tests.PlayMode
@@ -179,25 +180,18 @@ namespace JumpNowBro.Tests.PlayMode
             // Swap the live level list for an empty one so Continue's LoadNext takes the completion path (fires
             // OnBeforeLevelLoad + OnAllLevelsComplete) instead of actually loading the next scene. Restored after.
             var lm = LevelManager.Instance;
-            var savedLevels = GetField(lm, "levelSceneNames");
-            SetField(lm, "levelSceneNames", new string[0]);
-
-            // #130: the raw SceneManager loads in this fixture never drive LevelManager, so seed what a real
-            // load provides — a live tracker run and a current level index — or the goal takes the no-run
-            // fallback (instant advance) and the hold path goes untested.
             var rsc = RunSummaryController.Instance;
             Assert.IsNotNull(rsc, "RunSummaryController did not self-spawn.");
-            ((LevelRunTracker)GetField(rsc, "tracker")).Begin();
-            SetField(lm, "currentLevelIndex", 0);
-            // The goal accounting writes a REAL solo record for level 0 — capture the developer's, restore after.
-            int prevBestT = PlayerPrefs.GetInt("records.solo.level0.bestTimeMs", -1);
-            int prevBestD = PlayerPrefs.GetInt("records.solo.level0.fewestDeaths", -1);
-
             bool advanced = false;
             void OnBefore(int _) => advanced = true;
-            lm.OnBeforeLevelLoad += OnBefore;
+            using var saved = new GoalTestState(lm, rsc);
             try
             {
+                SetField(lm, "levelSceneNames", new string[0]);
+                // Raw scene loads do not seed the run tracker or LevelManager index.
+                ((LevelRunTracker)GetField(rsc, "tracker")).Begin();
+                SetField(lm, "currentLevelIndex", 0);
+                lm.OnBeforeLevelLoad += OnBefore;
                 yield return DriveInto(goal.GetComponent<Collider2D>());
                 Assert.IsFalse(advanced, "The goal must HOLD at the summary card, not advance immediately (#130).");
                 Assert.IsTrue(rsc.HoldActive, "Reaching the goal must enter the summary hold.");
@@ -210,14 +204,95 @@ namespace JumpNowBro.Tests.PlayMode
             finally
             {
                 lm.OnBeforeLevelLoad -= OnBefore;
-                SetField(lm, "levelSceneNames", savedLevels);
-                SetField(lm, "currentLevelIndex", -1);
-                rsc.ResetAll();          // hold/totals latch on the DontDestroyOnLoad controller across tests otherwise
-                if (prevBestT >= 0) PlayerPrefs.SetInt("records.solo.level0.bestTimeMs", prevBestT);
-                else PlayerPrefs.DeleteKey("records.solo.level0.bestTimeMs");
-                if (prevBestD >= 0) PlayerPrefs.SetInt("records.solo.level0.fewestDeaths", prevBestD);
-                else PlayerPrefs.DeleteKey("records.solo.level0.fewestDeaths");
-                PlayerPrefs.Save();
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator Goal_SetupFailure_RestoresPreferencesAndLevelState()
+        {
+            yield return LoadLevelAndGrabPlayer("Level_01");
+            var lm = LevelManager.Instance;
+            var rsc = RunSummaryController.Instance;
+            using var original = new GoalTestState(lm, rsc);
+            // Cover absent keys and present negative values, which cannot use a sentinel for absence.
+            for (int i = 0; i < GoalTestState.Keys.Length; i++)
+                if (i % 2 == 0) PlayerPrefs.DeleteKey(GoalTestState.Keys[i]);
+                else PlayerPrefs.SetInt(GoalTestState.Keys[i], -10 - i);
+
+            var expected = new GoalTestState(lm, rsc);
+            Assert.Throws<AssertionException>(() =>
+            {
+                using (expected)
+                {
+                    SetField(lm, "levelSceneNames", new string[0]);
+                    SetField(lm, "currentLevelIndex", 0);
+                    lm.SummaryHold = true;
+                    foreach (string key in GoalTestState.Keys) PlayerPrefs.SetInt(key, 1234);
+                    Assert.Fail("Injected setup failure.");
+                }
+            });
+            expected.AssertRestored();
+        }
+
+        sealed class GoalTestState : System.IDisposable
+        {
+            public static readonly string[] Keys =
+            {
+                "records.solo.level0.bestTimeMs", "records.solo.level0.fewestDeaths",
+                "lifetime.playtimeSec", "lifetime.deaths", "lifetime.swaps"
+            };
+            readonly bool[] existed = new bool[Keys.Length];
+            readonly int[] values = new int[Keys.Length];
+            readonly LevelManager lm;
+            readonly RunSummaryController rsc;
+            readonly object levels;
+            readonly object levelIndex;
+            readonly bool summaryHold;
+
+            public GoalTestState(LevelManager lm, RunSummaryController rsc)
+            {
+                this.lm = lm;
+                this.rsc = rsc;
+                levels = GetField(lm, "levelSceneNames");
+                levelIndex = GetField(lm, "currentLevelIndex");
+                summaryHold = lm.SummaryHold;
+                for (int i = 0; i < Keys.Length; i++)
+                {
+                    existed[i] = PlayerPrefs.HasKey(Keys[i]);
+                    values[i] = PlayerPrefs.GetInt(Keys[i]);
+                }
+            }
+
+            public void Dispose()
+            {
+                try
+                {
+                    SetField(lm, "levelSceneNames", levels);
+                    SetField(lm, "currentLevelIndex", levelIndex);
+                    rsc.ResetAll();
+                    if (CommsController.Instance != null) CommsController.Instance.ResetAll();
+                    lm.SummaryHold = summaryHold;
+                    if (CompleteScreen.Instance != null) CompleteScreen.Instance.HidePanel();
+                }
+                finally
+                {
+                    for (int i = 0; i < Keys.Length; i++)
+                        if (existed[i]) PlayerPrefs.SetInt(Keys[i], values[i]);
+                        else PlayerPrefs.DeleteKey(Keys[i]);
+                    PlayerPrefs.Save();
+                }
+            }
+
+            public void AssertRestored()
+            {
+                Assert.AreSame(levels, GetField(lm, "levelSceneNames"));
+                Assert.AreEqual(levelIndex, GetField(lm, "currentLevelIndex"));
+                Assert.AreEqual(summaryHold, lm.SummaryHold);
+                for (int i = 0; i < Keys.Length; i++)
+                {
+                    Assert.AreEqual(existed[i], PlayerPrefs.HasKey(Keys[i]), Keys[i]);
+                    if (existed[i]) Assert.AreEqual(values[i], PlayerPrefs.GetInt(Keys[i]), Keys[i]);
+                }
             }
         }
 

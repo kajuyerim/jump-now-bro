@@ -4,6 +4,7 @@
     "references": [
         "JumpNowBro.Util",
         "JumpNowBro.Gameplay",
+        "JumpNowBro.Networking",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner"
     ],
