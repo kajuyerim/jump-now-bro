@@ -6,7 +6,8 @@
         "JumpNowBro.Gameplay",
         "JumpNowBro.Networking",
         "UnityEngine.TestRunner",
-        "UnityEditor.TestRunner"
+        "UnityEditor.TestRunner",
+        "UnityEngine.UI"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
