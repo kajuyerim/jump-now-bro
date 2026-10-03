@@ -79,6 +79,7 @@ namespace JumpNowBro.Networking
         double nextQualityLog;         // #132 diagnostics: 5 s cadence for the [net-quality] console line
         Session.DisconnectReason lostReason;
         string localPlayerName = "";   // #114: this player's display name from the menu (stamped into HELLO/WELCOME)
+        ushort? clientHostPort;        // discovered endpoint override; retained for rejoin, null for manual/startup joins
         byte localColorIndex;          // #125: assigned colour slot — host = 0, client = 1
         double clock;
         readonly byte[] eventSendScratch = new byte[EventBody.MaxSize];   // sized to the largest EVENT variant (RunSummary)
@@ -299,7 +300,7 @@ namespace JumpNowBro.Networking
         {
             gameplaySocket = new UdpSocket(0);                            // ephemeral port: host + client coexist on one machine
             discovery = DiscoveryService.StartClient(discoveryPort);      // host list builds for the connection UI
-            var host = new IPEndPoint(IPAddress.Parse(manualHostIp), gameplayPort);
+            var host = new IPEndPoint(IPAddress.Parse(manualHostIp), clientHostPort ?? gameplayPort);
             var inner = new UdpDatagramChannel(gameplaySocket, host);
             IDatagramChannel ch = inner;
 #if UNITY_EDITOR
@@ -776,7 +777,7 @@ namespace JumpNowBro.Networking
             catch (System.Exception e) { Debug.LogError($"BeginHosting failed: {e.Message}"); EndSessionFromUi(); }
         }
 
-        public void BeginClientFromUi(string hostIp, string playerName = null)
+        public void BeginClientFromUi(string hostIp, string playerName = null, ushort? hostPort = null)
         {
             if (Role != GameRole.SinglePlayer || session != null) return;
             if (string.IsNullOrWhiteSpace(hostIp)) return;
@@ -785,6 +786,7 @@ namespace JumpNowBro.Networking
             localColorIndex = 1;                  // client = slot 1 (#125)
             Role = GameRole.Client;
             manualHostIp = hostIp;
+            clientHostPort = hostPort;
             Application.runInBackground = true;
             try { BeginClient(); }
             catch (System.Exception e) { Debug.LogError($"BeginClient failed: {e.Message}"); EndSessionFromUi(); }

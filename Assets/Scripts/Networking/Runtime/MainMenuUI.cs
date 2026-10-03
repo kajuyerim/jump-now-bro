@@ -324,7 +324,7 @@ namespace JumpNowBro.Networking
             if (hostList == null) return;
             var hosts = browse?.Hosts;
             var current = new HashSet<string>();
-            if (hosts != null) foreach (var h in hosts.Hosts) current.Add(h.Endpoint.Address + "|" + h.Name);
+            if (hosts != null) foreach (var h in hosts.Hosts) current.Add(h.Endpoint + "|" + h.Name);
             if (current.SetEquals(shownHosts)) return;
             shownHosts.Clear();
             foreach (var c in current) shownHosts.Add(c);
@@ -333,8 +333,9 @@ namespace JumpNowBro.Networking
             foreach (var h in hosts.Hosts)
             {
                 string ip = h.Endpoint.Address.ToString();
+                ushort port = (ushort)h.Endpoint.Port;
                 string label = string.IsNullOrEmpty(h.Name) ? ip : $"{h.Name}  {ip}";
-                var btn = MakeButton(hostList.transform, label, 330, 38, () => { DisposeBrowse(); net.BeginClientFromUi(ip, nameField.text); });
+                var btn = MakeButton(hostList.transform, label, 330, 38, () => { DisposeBrowse(); net.BeginClientFromUi(ip, nameField.text, port); });
                 var lt = btn.GetComponentInChildren<TMP_Text>();   // a long lobby name shrinks instead of overflowing the button
                 lt.enableAutoSizing = true; lt.fontSizeMin = 12; lt.fontSizeMax = 20;
             }
