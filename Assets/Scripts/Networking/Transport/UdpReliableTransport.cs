@@ -10,7 +10,7 @@ namespace JumpNowBro.Networking
     /// milestones; the peer-silence timeout that fires OnDisconnected lives here (armed on first inbound).
     public sealed class UdpReliableTransport : IReliableTransport
     {
-        const int MaxDatagram = 1200;                 // MTU-safe ceiling; oversized sends are dropped
+        const int MaxDatagram = 1200;                 // MTU-safe ceiling; oversized unreliable sends are dropped
 
         readonly IDatagramChannel channel;
         readonly AckSystem ackTracker = new AckSystem();              // over received reliable message-seqs
@@ -23,7 +23,8 @@ namespace JumpNowBro.Networking
         readonly double silenceTimeout;                 // peer-silence → OnDisconnected
 
         ushort nextPacketSeq = 1;                      // 0 reserved; stamps every datagram, drives unreliable latest-wins
-        ushort highestPacketSeq;                       // 0 = none seen yet
+        ushort highestPacketSeq;
+        bool receivedPacket;                           // keep initialization separate from the wrapping wire sequence
         uint seenPacketBits;                           // bit n = received (highestPacketSeq - 1 - n); loss-vs-reorder discriminator (#132)
         int packetsAccepted;                           // inbound datagrams counted once each (newest or late-but-new)
         int packetsMissed;                             // cumulative seq gaps, repaired when a late arrival proves reorder not loss
@@ -65,7 +66,16 @@ namespace JumpNowBro.Networking
         {
             // Reliable rides the send queue (assigned a stable message-seq, flushed next Tick); unreliable
             // goes out immediately. Type and channel must agree per the DESIGN §8 discipline.
-            if (ch == Channel.Reliable) sendQueue.Queue(type, payload);
+            if (ch != Channel.Unreliable && ch != Channel.Reliable)
+                throw new ArgumentOutOfRangeException(nameof(ch), ch, "Unknown transport channel.");
+            bool reliable = IsReliable(type);
+            if (reliable != (ch == Channel.Reliable))
+                throw new ArgumentException($"Message type {type} does not belong to channel {ch}.", nameof(type));
+            if (reliable)
+            {
+                ValidateReliablePayload(payload);
+                sendQueue.Queue(type, payload);
+            }
             else SendFramed(type, 0, payload, NowMs());
         }
 
@@ -73,7 +83,12 @@ namespace JumpNowBro.Networking
         // caller-fixed message-seq, without enqueuing it for retransmit. See IReliableTransport for why
         // the seq must stay constant across probes (the peer's in-order receive buffer dedupes them).
         public void SendReliableFixedSeq(MessageType type, ushort messageSeq, ReadOnlySpan<byte> payload)
-            => SendFramed(type, messageSeq, payload, NowMs());
+        {
+            if (!IsReliable(type))
+                throw new ArgumentException($"Message type {type} does not belong to the reliable channel.", nameof(type));
+            ValidateReliablePayload(payload);
+            SendFramed(type, messageSeq, payload, NowMs());
+        }
 
         public bool TryReceive(out MessageType type, out byte[] payload)
         {
@@ -105,6 +120,8 @@ namespace JumpNowBro.Networking
             int size = PacketHeader.Size + (reliable ? 2 : 0) + body.Length;
             if (size > scratch.Length)                  // oversized: drop loudly (no fragmentation — our messages are tiny)
             {
+                if (reliable)
+                    throw new ArgumentOutOfRangeException(nameof(body), body.Length, $"Reliable message {type} exceeds the {scratch.Length}-byte MTU ceiling.");
                 oversizedSends++;
                 Logger?.Invoke($"send dropped: {size} B exceeds {scratch.Length} B MTU ceiling (type {type})");
                 return;
@@ -137,17 +154,19 @@ namespace JumpNowBro.Networking
             // packet books its seq gap as missed; a stale packet that flips a previously-unseen history bit
             // repairs one miss (it was reordered, not lost); duplicates change nothing. Loss here is an
             // inbound-only proxy: each end reports what IT failed to receive.
-            bool newestPacket = highestPacketSeq == 0 || SeqMath.IsNewer(h.seq, highestPacketSeq);
+            bool newestPacket = !receivedPacket || SeqMath.IsNewer(h.seq, highestPacketSeq);
             if (newestPacket)
             {
-                if (highestPacketSeq != 0)                    // first-ever inbound seeds the baseline, no misses booked
+                if (receivedPacket)                          // first-ever inbound seeds the baseline, no misses booked
                 {
                     int gap = SeqMath.Delta(h.seq, highestPacketSeq);
                     packetsMissed += gap - 1;
-                    seenPacketBits = gap >= 32 ? 0u : (seenPacketBits << gap) | (1u << (gap - 1));
+                    seenPacketBits = gap >= 32 ? 0u : seenPacketBits << gap;
+                    if (gap <= 32) seenPacketBits |= 1u << (gap - 1); // previous highest still fits at the exact boundary
                 }
                 packetsAccepted++;
                 highestPacketSeq = h.seq;
+                receivedPacket = true;
             }
             else
             {
@@ -216,6 +235,15 @@ namespace JumpNowBro.Networking
         // Channel discipline (DESIGN §8): these ride the reliable channel and carry a message-seq prefix.
         static bool IsReliable(MessageType t) =>
             t == MessageType.Event || t == MessageType.Hello || t == MessageType.Welcome || t == MessageType.Goodbye;
+
+        static void ValidateReliablePayload(ReadOnlySpan<byte> payload)
+        {
+            if (payload.Length > ReliableReceiveBuffer.MaxPayloadSize)
+                throw new ArgumentOutOfRangeException(nameof(payload), payload.Length, $"Reliable payload exceeds the {ReliableReceiveBuffer.MaxPayloadSize}-byte receive limit.");
+            int size = PacketHeader.Size + 2 + payload.Length;
+            if (size > MaxDatagram)
+                throw new ArgumentOutOfRangeException(nameof(payload), payload.Length, $"Reliable message exceeds the {MaxDatagram}-byte MTU ceiling.");
+        }
 
         static ushort NextSeq(ushort s) { s++; return s == 0 ? (ushort)1 : s; }
     }

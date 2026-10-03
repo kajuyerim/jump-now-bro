@@ -92,6 +92,58 @@ namespace JumpNowBro.Tests
         }
 
         [Test]
+        public void Reader_BytesZeroLength_SucceedsWithoutConsuming()
+        {
+            var r = new ByteReader(new byte[] { 1, 2 });
+            Assert.IsTrue(r.TryReadBytes(0, out var bytes));
+            Assert.AreEqual(0, bytes.Length);
+            Assert.AreEqual(2, r.Remaining);
+        }
+
+        [Test]
+        public void Reader_NegativeBytesLength_FailsWithoutConsuming()
+        {
+            var r = new ByteReader(new byte[] { 1, 2 });
+            Assert.IsFalse(r.TryReadBytes(-1, out _));
+            Assert.AreEqual(2, r.Remaining);
+        }
+
+        [Test]
+        public void Reader_MaxStringLength_IsAcceptedAtExactBoundary()
+        {
+            string expected = new string('x', ByteReader.MaxStringLength);
+            var buf = new byte[2 + expected.Length];
+            new ByteWriter(buf).WriteString(expected);
+
+            var r = new ByteReader(buf);
+            Assert.IsTrue(r.TryReadString(out var actual));
+            Assert.AreEqual(expected, actual);
+            Assert.AreEqual(0, r.Remaining);
+        }
+
+        [Test]
+        public void Reader_StringOneOverMaximum_IsRejectedWithoutConsuming()
+        {
+            int length = ByteReader.MaxStringLength + 1;
+            var buf = new byte[2 + length];
+            new ByteWriter(buf).WriteString(new string('x', length));
+            var r = new ByteReader(buf);
+
+            Assert.IsFalse(r.TryReadString(out var actual));
+            Assert.IsNull(actual);
+            Assert.AreEqual(buf.Length, r.Remaining);
+        }
+
+        [Test]
+        public void Writer_Reserve_ExactCapacitySucceeds()
+        {
+            var w = new ByteWriter(new byte[2]);
+            var reserved = w.Reserve(2);
+            Assert.AreEqual(2, reserved.Length);
+            Assert.AreEqual(2, w.Position);
+        }
+
+        [Test]
         public void SByte_RoundTrips()
         {
             var buf = new byte[3];
