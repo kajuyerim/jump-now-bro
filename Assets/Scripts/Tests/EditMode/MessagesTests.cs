@@ -402,25 +402,28 @@ namespace JumpNowBro.Tests
         [Test]
         public void EventBody_MaxSize_StillBoundsAllVariants()
         {
-            // RunSummary is the largest variant; every other kind must fit the shared send scratch.
             var buf = new byte[EventBody.MaxSize];
-            Assert.AreEqual(EventBody.MaxSize, EventBody.RunSummary(0, default).Write(buf));
-            Assert.LessOrEqual(EventBody.Swap(1u, ControlMap.Default, 1).Write(buf), EventBody.MaxSize);
-            Assert.LessOrEqual(EventBody.Death(1u, ControlMap.Default).Write(buf), EventBody.MaxSize);
-            Assert.LessOrEqual(EventBody.LobbyReady(true).Write(buf), EventBody.MaxSize);
-            Assert.LessOrEqual(EventBody.LobbyState(0).Write(buf), EventBody.MaxSize);
-            Assert.LessOrEqual(EventBody.Callout(CalloutId.Wait).Write(buf), EventBody.MaxSize);
-            Assert.LessOrEqual(EventBody.WorldPing(1f, 1f).Write(buf), EventBody.MaxSize);
-            Assert.LessOrEqual(EventBody.Countdown(1u).Write(buf), EventBody.MaxSize);
+            foreach (EventKind kind in Enum.GetValues(typeof(EventKind)))
+            {
+                var body = new EventBody { kind = kind, map = ControlMap.Default };
+                int n = body.Write(buf);
+                Assert.LessOrEqual(n, EventBody.MaxSize, $"{kind} exceeds the shared send scratch.");
+                Assert.IsTrue(EventBody.TryRead(buf.AsSpan(0, n), out var roundTrip),
+                    $"{kind} must implement both Write and TryRead.");
+                Assert.AreEqual(kind, roundTrip.kind);
+            }
         }
 
         [Test]
         public void EventBody_UnknownKind_Rejected()
         {
-            // Kind = 99: outside the defined enum range.
-            Assert.IsFalse(EventBody.TryRead(new byte[] { 99, 0 }, out _));
-            // And the exact boundary: one past the last defined kind (Countdown = 9).
-            Assert.IsFalse(EventBody.TryRead(new byte[] { 10, 0 }, out _));
+            var buf = new byte[EventBody.MaxSize];
+            for (int value = 0; value <= byte.MaxValue; value++)
+            {
+                if (Enum.IsDefined(typeof(EventKind), (byte)value)) continue;
+                buf[0] = (byte)value;
+                Assert.IsFalse(EventBody.TryRead(buf, out _), $"Undefined event kind {value} was accepted.");
+            }
         }
 
         [Test]

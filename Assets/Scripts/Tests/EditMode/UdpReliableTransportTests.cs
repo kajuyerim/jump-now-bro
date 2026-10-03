@@ -155,16 +155,24 @@ namespace JumpNowBro.Tests
         [Test]
         public void UnknownType_Dropped_AfterAckHarvest()
         {
-            var (ca, cb) = InMemoryDatagramChannel.Pair();
-            var b = new UdpReliableTransport(cb);
-            // 11-byte header with an out-of-range type byte (99), seq=1; inject raw into b's receive path.
-            var dg = new byte[PacketHeader.Size + 1];
-            dg[0] = 99;
-            dg[2] = 1;                                  // seq lo = 1
-            ca.Send(dg);
-            b.Tick(0.016f);
-            Assert.AreEqual(1, b.DroppedDatagrams);
-            Assert.IsFalse(b.TryReceive(out _, out _));  // not dispatched
+            for (int value = 0; value <= byte.MaxValue; value++)
+            {
+                if (Enum.IsDefined(typeof(MessageType), (byte)value)) continue;
+                var (ca, cb) = InMemoryDatagramChannel.Pair();
+                var b = new UdpReliableTransport(cb);
+                b.Send(Channel.Reliable, MessageType.Event, new byte[] { 1 });
+                b.Tick(0);
+                Assert.AreEqual(1, b.PendingReliableCount);
+
+                var dg = new byte[PacketHeader.Size];
+                new PacketHeader { type = (MessageType)value, seq = 1, ack = 1 }.Write(dg);
+                ca.Send(dg);
+                b.Tick(0.016f);
+                Assert.AreEqual(1, b.DroppedDatagrams, $"Undefined message type {value} was accepted.");
+                Assert.IsFalse(b.TryReceive(out _, out _));
+                Assert.AreEqual(0, b.PendingReliableCount, "Unknown types must still harvest acknowledgements.");
+                Assert.IsTrue(b.Connected);
+            }
         }
 
         [Test]

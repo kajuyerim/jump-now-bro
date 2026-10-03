@@ -11,6 +11,7 @@ namespace JumpNowBro.Networking
     public sealed class UdpReliableTransport : IReliableTransport
     {
         const int MaxDatagram = 1200;                 // MTU-safe ceiling; oversized unreliable sends are dropped
+        static readonly HashSet<MessageType> KnownTypes = new HashSet<MessageType>((MessageType[])Enum.GetValues(typeof(MessageType)));
 
         readonly IDatagramChannel channel;
         readonly AckSystem ackTracker = new AckSystem();              // over received reliable message-seqs
@@ -203,7 +204,7 @@ namespace JumpNowBro.Networking
                     rtt.AddSample(SecondsSince(h.timestamp));
                     break;
                 default:
-                    if ((byte)h.type > (byte)MessageType.Pong)        // unknown type: drop AFTER acks + liveness harvested above
+                    if (!KnownTypes.Contains(h.type))               // unknown type: drop AFTER acks + liveness harvested above
                     {
                         droppedDatagrams++;
                         break;

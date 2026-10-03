@@ -21,6 +21,21 @@ namespace JumpNowBro.Tests
             Assert.AreEqual(11, PacketHeader.Size);
         }
 
+        [TestCase(MessageType.Hello, 0)]
+        [TestCase(MessageType.Welcome, 1)]
+        [TestCase(MessageType.Goodbye, 2)]
+        [TestCase(MessageType.Input, 3)]
+        [TestCase(MessageType.State, 4)]
+        [TestCase(MessageType.Event, 5)]
+        [TestCase(MessageType.Ping, 6)]
+        [TestCase(MessageType.Pong, 7)]
+        public void MessageType_KeepsExistingWireValue(MessageType type, int wireValue)
+        {
+            var buf = new byte[PacketHeader.Size];
+            new PacketHeader { type = type }.Write(buf);
+            Assert.AreEqual(wireValue, buf[0]);
+        }
+
         [Test]
         public void Write_Then_TryRead_RoundTripsAllFields()
         {
