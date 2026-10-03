@@ -87,16 +87,7 @@ namespace JumpNowBro.Gameplay
         // with nothing saved, the serialized defaults reproduce the pre-settings behaviour.
         void Start()
         {
-            if (GameSettings.HasAudioPrefs)
-            {
-                GameSettings.ApplyAudio(this);
-            }
-            else
-            {
-                ApplyMasterToMixer();
-                ApplyMusicToMixer();
-                ApplySFXToMixer();
-            }
+            GameSettings.ApplyAudio(this);
         }
 
         // ---- volume API (#128's settings panel drives these; 0..1) ----
