@@ -65,10 +65,10 @@ namespace JumpNowBro.Tests.PlayMode
             playerGo.GetComponent<Rigidbody2D>().useFullKinematicContacts = true;
         }
 
-        IEnumerator DriveInto(Collider2D trigger)
+        IEnumerator DriveInto(Collider2D trigger, Vector2? destination = null)
         {
             var rb = playerGo.GetComponent<Rigidbody2D>();
-            Vector2 center = trigger.bounds.center;
+            Vector2 center = destination ?? (Vector2)trigger.bounds.center;
             // Clear of the trigger above it: trigger half-height + the player's own half-height (1) + margin,
             // so the 2-tall player body starts fully outside and the step-in is a real not→overlapping ENTER.
             float approach = trigger.bounds.extents.y + 1.5f;
@@ -168,6 +168,96 @@ namespace JumpNowBro.Tests.PlayMode
                 Assert.GreaterOrEqual(deaths, 1, "Touching a spike must kill the player (OnDeath should fire).");
             }
             finally { player.OnDeath -= OnDeath; }
+        }
+
+        [UnityTest]
+        public IEnumerator Hazard_Level02_OverlapKillsAfterInvulnerabilityExpires() =>
+            HazardExpiry("Level_02", "Spike_3");
+
+        [UnityTest]
+        public IEnumerator Hazard_Level03_FirstPairKillsAfterInvulnerabilityExpires() =>
+            HazardExpiry("Level_03", "Spike_2");
+
+        [UnityTest]
+        public IEnumerator Hazard_Level03_SecondPairKillsAfterInvulnerabilityExpires() =>
+            HazardExpiry("Level_03", "Spike_4");
+
+        [UnityTest]
+        public IEnumerator Hazard_Level03_ThirdPairKillsAfterInvulnerabilityExpires() =>
+            HazardExpiry("Level_03", "Spike_6");
+
+        IEnumerator HazardExpiry(string level, string spike)
+        {
+            yield return LoadLevelAndGrabPlayer(level);
+            var hazard = Object.FindObjectsByType<Hazard>().Single(h => h.name == spike).GetComponent<Collider2D>();
+            var body = playerGo.GetComponent<BoxCollider2D>();
+            var state = (MovementState)GetField(player, "currentState");
+            state.invulnTimer = 1f;
+            SetField(player, "currentState", state);
+            yield return DriveInto(hazard, new Vector2(hazard.bounds.center.x, hazard.bounds.min.y + body.bounds.extents.y + 0.01f));
+            Assert.IsTrue(body.IsTouching(hazard), "The regression must begin with a real sustained trigger contact.");
+            Assert.AreEqual(0, player.DeathCount, "Entering while invulnerable must survive.");
+
+            state = (MovementState)GetField(player, "currentState");
+            state.invulnTimer = Time.fixedDeltaTime * 3;
+            SetField(player, "currentState", state);
+            player.Inject(new HazardTestInput(), new HazardTestInput());
+            var position = playerGo.GetComponent<Rigidbody2D>().position;
+            for (int i = 0; i < 6; i++) yield return new WaitForFixedUpdate();
+
+            Assert.IsFalse(player.IsInvulnerable);
+            Assert.IsTrue(player.IsDead, "A stationary player must die when invulnerability expires inside a spike.");
+            Assert.AreEqual(1, player.DeathCount, "Repeated stay callbacks must not count another death during the freeze.");
+            Assert.That(Vector2.Distance(position, playerGo.GetComponent<Rigidbody2D>().position), Is.LessThan(0.05f));
+        }
+
+        [UnityTest]
+        public IEnumerator Hazard_Level02_JumpDashClearsStrip() => JumpDashClearsHazards("Level_02", "Spike_1", "Spike_3");
+
+        [UnityTest]
+        public IEnumerator Hazard_Level03_JumpDashClearsPair() => JumpDashClearsHazards("Level_03", "Spike_1", "Spike_2");
+
+        IEnumerator JumpDashClearsHazards(string level, string firstName, string lastName)
+        {
+            yield return LoadLevelAndGrabPlayer(level);
+            var hazards = Object.FindObjectsByType<Hazard>();
+            var first = hazards.Single(h => h.name == firstName).GetComponent<Collider2D>();
+            var last = hazards.Single(h => h.name == lastName).GetComponent<Collider2D>();
+            var rb = playerGo.GetComponent<Rigidbody2D>();
+            var body = playerGo.GetComponent<BoxCollider2D>();
+            rb.position = new Vector2(first.bounds.min.x - body.bounds.extents.x - 0.1f,
+                first.bounds.min.y + body.bounds.extents.y + 0.01f);
+            Physics2D.SyncTransforms();
+            var input = new HazardTestInput { jumpPressed = true, jumpHeld = true };
+            player.Inject(input, input);
+            int dashes = 0;
+            void OnDash() => dashes++;
+            player.OnDash += OnDash;
+            try
+            {
+                for (int i = 0; i < 4; i++) yield return new WaitForFixedUpdate();
+                input.moveRight = true;
+                input.dashPressed = true;
+                float clearX = last.bounds.max.x + body.bounds.extents.x + 0.05f;
+                for (int i = 0; i < 45 && rb.position.x < clearX && !player.IsDead; i++)
+                    yield return new WaitForFixedUpdate();
+                Assert.AreEqual(1, dashes, "The real controller must execute the dash.");
+                Assert.That(rb.position.x, Is.GreaterThanOrEqualTo(clearX), "The player must clear the complete spike strip.");
+                Assert.IsFalse(player.IsInvulnerable, "Survival must continue after the dash's protection expires.");
+                Assert.AreEqual(0, player.DeathCount, "A jump-and-dash that clears the spikes must remain viable.");
+            }
+            finally { player.OnDash -= OnDash; }
+        }
+
+        sealed class HazardTestInput : IInputSource
+        {
+            public bool moveRight, jumpPressed, jumpHeld, dashPressed;
+            public bool MoveLeft => false;
+            public bool MoveRight => moveRight;
+            public bool JumpPressed => jumpPressed;
+            public bool JumpHeld => jumpHeld;
+            public bool DashPressed => dashPressed;
+            public void Tick() { jumpPressed = false; dashPressed = false; }
         }
 
         [UnityTest]
