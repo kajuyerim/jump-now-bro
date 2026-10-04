@@ -46,5 +46,46 @@ namespace JumpNowBro.Tests
             rtt.AddSample(-1f);
             Assert.AreEqual(0.05f, rtt.RttSeconds, 1e-6f);
         }
+
+        [TestCase(-1f)]
+        [TestCase(float.NaN)]
+        [TestCase(float.NegativeInfinity)]
+        [TestCase(float.PositiveInfinity)]
+        [TestCase(RttEstimator.MaxSampleSeconds + 0.001f)]
+        public void InvalidFirstSample_DoesNotSeedOrChangeDiagnostics(float sample)
+        {
+            var rtt = new RttEstimator();
+            rtt.AddSample(sample);
+            Assert.AreEqual(0.1f, rtt.RttSeconds);
+            Assert.AreEqual(0f, rtt.LastSampleSeconds);
+            rtt.AddSample(0.04f);
+            Assert.AreEqual(0.04f, rtt.RttSeconds, 1e-6f);
+        }
+
+        [TestCase(-1f)]
+        [TestCase(float.NaN)]
+        [TestCase(float.NegativeInfinity)]
+        [TestCase(float.PositiveInfinity)]
+        [TestCase(RttEstimator.MaxSampleSeconds + 0.001f)]
+        public void InvalidSample_DoesNotBlendOrChangeDiagnostics(float sample)
+        {
+            var rtt = new RttEstimator();
+            rtt.AddSample(0.2f);
+            rtt.AddSample(sample);
+            Assert.AreEqual(0.2f, rtt.RttSeconds);
+            Assert.AreEqual(0.2f, rtt.LastSampleSeconds);
+            rtt.AddSample(0.4f);
+            Assert.AreEqual(0.225f, rtt.RttSeconds, 1e-6f);
+        }
+
+        [TestCase(0f)]
+        [TestCase(RttEstimator.MaxSampleSeconds)]
+        public void SampleAtBoundary_IsAccepted(float sample)
+        {
+            var rtt = new RttEstimator();
+            rtt.AddSample(sample);
+            Assert.AreEqual(sample, rtt.RttSeconds);
+            Assert.AreEqual(sample, rtt.LastSampleSeconds);
+        }
     }
 }
