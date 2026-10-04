@@ -7,6 +7,8 @@ namespace JumpNowBro.Networking
     /// stops beaconing. Pure logic (no sockets) so it's unit-testable.
     public sealed class DiscoveredHosts
     {
+        public const int MaxHosts = 32;
+
         public readonly struct Host
         {
             public readonly IPEndPoint Endpoint;
@@ -22,7 +24,22 @@ namespace JumpNowBro.Networking
 
         public void Observe(IPEndPoint gameplayEndpoint, string name, double now)
         {
-            hosts[gameplayEndpoint.ToString()] = new Host(gameplayEndpoint, name, now);   // dedup by endpoint
+            string key = gameplayEndpoint.ToString();
+            if (!hosts.ContainsKey(key) && hosts.Count == MaxHosts)
+            {
+                // Prefer recently heard hosts; break same-tick ties without dictionary-order dependence.
+                string oldest = null;
+                double oldestTime = double.PositiveInfinity;
+                foreach (var kv in hosts)
+                    if (oldest == null || kv.Value.LastSeen < oldestTime ||
+                        (kv.Value.LastSeen == oldestTime && string.CompareOrdinal(kv.Key, oldest) < 0))
+                    {
+                        oldest = kv.Key;
+                        oldestTime = kv.Value.LastSeen;
+                    }
+                hosts.Remove(oldest);
+            }
+            hosts[key] = new Host(gameplayEndpoint, name, now);
         }
 
         public void Expire(double now, double ttlSeconds)

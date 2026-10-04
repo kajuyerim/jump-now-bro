@@ -144,6 +144,46 @@ namespace JumpNowBro.Tests.PlayMode
             Assert.AreEqual(advertisedHost.Port, GetNullableUShort(client, "clientHostPort"));
         }
 
+        [UnityTest]
+        public IEnumerator DiscoveryMenu_ListsSeveralHosts_AndStaysBoundedDuringFlood()
+        {
+            Set(client, "discoveryPort", (ushort)0);
+            browse = DiscoveryService.StartClient(0);
+            Set(menu, "browse", browse);
+            var receiver = Get<UdpSocket>(browse, "socket");
+            using var sender = new UdpSocket(0);
+            var endpoint = new IPEndPoint(IPAddress.Loopback, receiver.LocalPort);
+            var data = new byte[64];
+            for (ushort port = 10000; port < 10003; port++) SendBeacon(sender, endpoint, data, port);
+            float deadline = Time.realtimeSinceStartup + 3f;
+            while (browse.Hosts.Count < 3 && Time.realtimeSinceStartup < deadline) yield return null;
+            Assert.AreEqual(3, browse.Hosts.Count);
+            Invoke(menu, "RefreshHosts");
+            yield return null;
+            var hostList = Get<GameObject>(menu, "hostList");
+            Assert.AreEqual(3, hostList.GetComponentsInChildren<Button>().Length);
+
+            for (int frame = 0; frame < 12; frame++)
+            {
+                for (int i = 0; i < 256; i++)
+                    SendBeacon(sender, endpoint, data, (ushort)(11000 + frame * 256 + i));
+                yield return null;
+                Assert.LessOrEqual(browse.Hosts.Count, DiscoveredHosts.MaxHosts);
+                Assert.LessOrEqual(receiver.QueuedDatagramCount, DiscoveryService.MaxQueuedDatagrams);
+            }
+            Assert.AreEqual(DiscoveredHosts.MaxHosts, browse.Hosts.Count);
+            Assert.Greater(receiver.DroppedDatagramCount, 0, "the burst should exercise queue overflow");
+            Invoke(menu, "RefreshHosts");
+            yield return null; // Unity removes the previous buttons at the end of the frame.
+            Assert.AreEqual(DiscoveredHosts.MaxHosts, hostList.GetComponentsInChildren<Button>().Length);
+        }
+
+        static void SendBeacon(UdpSocket sender, IPEndPoint endpoint, byte[] data, ushort port)
+        {
+            int size = new LanBeacon { Magic = SessionProtocol.Magic, GameName = "lan-host", GameplayPort = port }.Write(data);
+            sender.Send(new System.ReadOnlySpan<byte>(data, 0, size), endpoint);
+        }
+
         IEnumerator WaitForEstablished(UdpHost host, float timeoutSeconds)
         {
             float deadline = Time.realtimeSinceStartup + timeoutSeconds;

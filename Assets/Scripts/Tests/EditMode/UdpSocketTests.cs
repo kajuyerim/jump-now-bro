@@ -42,6 +42,57 @@ namespace JumpNowBro.Tests
         }
 
         [Test]
+        public void BoundedReceiveQueue_DropsOverflowAndAcceptsAfterDrain()
+        {
+            using var receiver = new UdpSocket(0, maxQueuedDatagrams: 8);
+            using var sender = new UdpSocket(0);
+            var endpoint = new IPEndPoint(IPAddress.Loopback, receiver.LocalPort);
+            for (int i = 0; i < 8; i++)
+            {
+                sender.Send(new byte[] { 1 }, endpoint);
+                Assert.IsTrue(SpinWait.SpinUntil(() => receiver.QueuedDatagramCount == i + 1, 2000));
+            }
+            for (int i = 0; i < 16; i++)
+            {
+                sender.Send(new byte[] { 1 }, endpoint);
+                Assert.IsTrue(SpinWait.SpinUntil(() => receiver.DroppedDatagramCount == i + 1, 2000));
+            }
+            Assert.AreEqual(8, receiver.QueuedDatagramCount);
+            int drained = 0;
+            while (receiver.Poll(out var data, out _))
+            {
+                Assert.AreEqual(new byte[] { 1 }, data);
+                drained++;
+            }
+            Assert.AreEqual(8, drained);
+
+            sender.Send(new byte[] { 2 }, endpoint);
+            Assert.IsTrue(SpinWait.SpinUntil(() => receiver.QueuedDatagramCount == 1, 2000));
+            Assert.IsTrue(receiver.Poll(out var next, out _));
+            Assert.AreEqual(new byte[] { 2 }, next);
+        }
+
+        [Test]
+        public void DefaultReceiveQueue_DoesNotApplyDiscoveryCap()
+        {
+            using var receiver = new UdpSocket(0);
+            using var sender = new UdpSocket(0);
+            var endpoint = new IPEndPoint(IPAddress.Loopback, receiver.LocalPort);
+            for (int i = 0; i <= DiscoveryService.MaxQueuedDatagrams; i++)
+            {
+                sender.Send(new byte[] { 1 }, endpoint);
+                Assert.IsTrue(SpinWait.SpinUntil(() => receiver.QueuedDatagramCount == i + 1, 2000));
+            }
+            Assert.AreEqual(0, receiver.DroppedDatagramCount);
+        }
+
+        [Test]
+        public void NegativeReceiveQueueLimit_IsRejected()
+        {
+            Assert.Throws<ArgumentOutOfRangeException>(() => new UdpSocket(0, maxQueuedDatagrams: -1));
+        }
+
+        [Test]
         public void Dispose_IsCleanAndIdempotent()
         {
             var s = new UdpSocket(0);
