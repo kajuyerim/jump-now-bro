@@ -11,6 +11,8 @@ namespace JumpNowBro.Networking
     {
         const double BeaconIntervalSeconds = 1.0;
         const double HostTtlSeconds = 4.0;
+        public const int MaxDatagramsPerTick = 64;
+        public const int MaxQueuedDatagrams = 128;
 
         readonly UdpSocket socket;
         readonly int discoveryPort;
@@ -26,7 +28,7 @@ namespace JumpNowBro.Networking
             this.discoveryPort = discoveryPort;
             this.isHost = isHost;
             this.beacon = beacon;
-            socket = new UdpSocket(discoveryPort, broadcast: true);
+            socket = new UdpSocket(discoveryPort, broadcast: true, maxQueuedDatagrams: MaxQueuedDatagrams);
         }
 
         public static DiscoveryService StartHost(int discoveryPort, LanBeacon beacon) => new DiscoveryService(discoveryPort, true, beacon);
@@ -38,13 +40,11 @@ namespace JumpNowBro.Networking
             {
                 if (now - lastBeaconAt >= BeaconIntervalSeconds) { Broadcast(); lastBeaconAt = now; }
             }
-            else
-            {
-                while (socket.Poll(out var data, out var from))
-                    if (LanBeacon.TryRead(data, out var b) && b.Magic == SessionProtocol.Magic)
-                        Hosts.Observe(new IPEndPoint(from.Address, b.GameplayPort), b.GameName, now);
-                Hosts.Expire(now, HostTtlSeconds);
-            }
+            Hosts.Expire(now, HostTtlSeconds);
+            // Hosts discard incoming beacons too; their broadcast socket also receives LAN traffic.
+            for (int i = 0; i < MaxDatagramsPerTick && socket.Poll(out var data, out var from); i++)
+                if (!isHost && LanBeacon.TryRead(data, out var b) && b.Magic == SessionProtocol.Magic)
+                    Hosts.Observe(new IPEndPoint(from.Address, b.GameplayPort), b.GameName, now);
         }
 
         void Broadcast()

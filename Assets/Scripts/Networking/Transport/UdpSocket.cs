@@ -21,16 +21,22 @@ namespace JumpNowBro.Networking
         readonly UdpClient client;
         readonly Thread receiveThread;
         readonly ConcurrentQueue<Datagram> inbox = new ConcurrentQueue<Datagram>();
+        readonly int maxQueuedDatagrams;
+        long droppedDatagrams;
         volatile bool running;
         bool disposed;
 
         public int LocalPort { get; }
+        public int QueuedDatagramCount => inbox.Count;
+        public long DroppedDatagramCount => Interlocked.Read(ref droppedDatagrams);
 
         // broadcast=true (discovery socket): permit sending to 255.255.255.255, and SO_REUSEADDR so a host
         // and client on the SAME machine can both bind the discovery port. The gameplay socket leaves both
         // OFF — SO_REUSEADDR there would let a second host bind the gameplay port and steal packets.
-        public UdpSocket(int bindPort, bool broadcast = false)
+        public UdpSocket(int bindPort, bool broadcast = false, int maxQueuedDatagrams = 0)
         {
+            if (maxQueuedDatagrams < 0) throw new ArgumentOutOfRangeException(nameof(maxQueuedDatagrams));
+            this.maxQueuedDatagrams = maxQueuedDatagrams; // zero preserves the gameplay socket's uncapped queue
             if (broadcast)
             {
                 client = new UdpClient();
@@ -81,6 +87,12 @@ namespace JumpNowBro.Networking
                 try
                 {
                     byte[] data = client.Receive(ref any);   // blocks; returns a right-sized array
+                    // One producer owns admission; the consumer can only free capacity concurrently.
+                    if (maxQueuedDatagrams > 0 && inbox.Count >= maxQueuedDatagrams)
+                    {
+                        Interlocked.Increment(ref droppedDatagrams);
+                        continue;
+                    }
                     inbox.Enqueue(new Datagram(data, new IPEndPoint(any.Address, any.Port)));
                 }
                 catch (SocketException) when (running)
