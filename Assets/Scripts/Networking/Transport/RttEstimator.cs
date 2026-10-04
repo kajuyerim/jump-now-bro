@@ -4,6 +4,8 @@ namespace JumpNowBro.Networking
     /// timer in the reliable send queue. Unit-agnostic floats — we feed and read seconds.
     public sealed class RttEstimator
     {
+        public const float MaxSampleSeconds = 5f;
+
         readonly float smoothing;
         bool hasSample;
 
@@ -23,7 +25,7 @@ namespace JumpNowBro.Networking
 
         public void AddSample(float rttSeconds)
         {
-            if (rttSeconds < 0f) return;                 // impossible sample (clock skew) — ignore
+            if (!(rttSeconds >= 0f && rttSeconds <= MaxSampleSeconds)) return; // also rejects NaN and infinities
             LastSampleSeconds = rttSeconds;
             if (!hasSample) { RttSeconds = rttSeconds; hasSample = true; }  // seed directly, no warmup bias
             else RttSeconds += smoothing * (rttSeconds - RttSeconds);       // EMA so one spike can't whipsaw it

@@ -175,6 +175,125 @@ namespace JumpNowBro.Tests
             }
         }
 
+        static void InjectPong(InMemoryDatagramChannel sender, uint stamp, ushort seq = 1, ushort ack = 0)
+        {
+            var datagram = new byte[PacketHeader.Size];
+            new PacketHeader { type = MessageType.Pong, timestamp = stamp, seq = seq, ack = ack }.Write(datagram);
+            sender.Send(datagram);
+        }
+
+        [Test]
+        public void Pong_WithoutAnySentPing_DoesNotSeedRtt()
+        {
+            var (ca, cb) = InMemoryDatagramChannel.Pair();
+            var a = new UdpReliableTransport(ca);
+            InjectPong(cb, 0);
+            a.Tick(0.02f);
+            Assert.AreEqual(0.1f, a.RttSeconds);
+            Assert.AreEqual(0f, a.LastRttSampleSeconds);
+            Assert.IsTrue(a.Connected, "RTT filtering must not suppress inbound liveness.");
+        }
+
+        [TestCase(1u)]
+        [TestCase(1000u)]
+        [TestCase(uint.MaxValue)]
+        public void Pong_UnmatchedTimestamp_DoesNotConsumeOutstandingPing(uint stamp)
+        {
+            var (ca, cb) = InMemoryDatagramChannel.Pair();
+            var a = new UdpReliableTransport(ca);
+            a.Tick(0);
+            InjectPong(cb, stamp);
+            a.Tick(0.05f);
+            Assert.AreEqual(0.1f, a.RttSeconds);
+            Assert.AreEqual(0f, a.LastRttSampleSeconds);
+            InjectPong(cb, 0, seq: 2);
+            a.Tick(0.05f);
+            Assert.AreEqual(0.1f, a.LastRttSampleSeconds, 0.001f);
+        }
+
+        [Test]
+        public void Pong_UnmatchedTimestamp_StillHarvestsAcknowledgements()
+        {
+            var (ca, cb) = InMemoryDatagramChannel.Pair();
+            var a = new UdpReliableTransport(ca);
+            a.Send(Channel.Reliable, MessageType.Event, new byte[] { 1 });
+            a.Tick(0);
+            Assert.AreEqual(1, a.PendingReliableCount);
+            InjectPong(cb, 9999, ack: 1);
+            a.Tick(0.02f);
+            Assert.AreEqual(0, a.PendingReliableCount);
+            Assert.AreEqual(0f, a.LastRttSampleSeconds);
+        }
+
+        [Test]
+        public void Pong_Duplicate_DoesNotSampleTwice()
+        {
+            var (ca, cb) = InMemoryDatagramChannel.Pair();
+            var a = new UdpReliableTransport(ca);
+            a.Tick(0);
+            InjectPong(cb, 0);
+            a.Tick(0.25f);
+            InjectPong(cb, 0, seq: 2);
+            a.Tick(0.25f);
+            Assert.AreEqual(0.25f, a.RttSeconds);
+            Assert.AreEqual(0.25f, a.LastRttSampleSeconds);
+        }
+
+        [Test]
+        public void Pong_EarlierPingStillMatchesAfterAnotherPingWasSent()
+        {
+            var (ca, cb) = InMemoryDatagramChannel.Pair();
+            var a = new UdpReliableTransport(ca);
+            a.Tick(0);
+            a.Tick(1f);
+            InjectPong(cb, 0);
+            a.Tick(0.25f);
+            Assert.AreEqual(1.25f, a.LastRttSampleSeconds);
+            InjectPong(cb, 1000, seq: 2);
+            a.Tick(0.25f);
+            Assert.AreEqual(0.5f, a.LastRttSampleSeconds);
+            Assert.AreEqual(1.15625f, a.RttSeconds);
+        }
+
+        [Test]
+        public void Pong_MatchingPingWithOverCeilingRtt_DoesNotSeedEstimator()
+        {
+            var (ca, cb) = InMemoryDatagramChannel.Pair();
+            var a = new UdpReliableTransport(ca);
+            a.Tick(0);
+            a.Tick(RttEstimator.MaxSampleSeconds + 1f);
+            InjectPong(cb, 0);
+            a.Tick(0);
+            Assert.AreEqual(0.1f, a.RttSeconds);
+            Assert.AreEqual(0f, a.LastRttSampleSeconds);
+        }
+
+        [Test]
+        public void Pong_OldestPingIsEvictedWhenOutstandingWindowFills()
+        {
+            var (ca, cb) = InMemoryDatagramChannel.Pair();
+            var a = new UdpReliableTransport(ca, pingIntervalSeconds: 0.125);
+            a.Tick(0);
+            for (int i = 0; i < 32; i++) a.Tick(0.125f);
+            InjectPong(cb, 0);
+            a.Tick(0);
+            Assert.AreEqual(0f, a.LastRttSampleSeconds, "The oldest of 33 pending timestamps must be evicted.");
+            InjectPong(cb, 4000, seq: 2);
+            a.Tick(0.125f);
+            Assert.AreEqual(0.125f, a.LastRttSampleSeconds);
+        }
+
+        [Test]
+        public void Pong_MatchesPingSentThroughPublicSend()
+        {
+            var (ca, cb) = InMemoryDatagramChannel.Pair();
+            var a = new UdpReliableTransport(ca);
+            a.Send(Channel.Unreliable, MessageType.Ping, ReadOnlySpan<byte>.Empty);
+            InjectPong(cb, 0);
+            a.Tick(0.125f);
+            Assert.AreEqual(0.125f, a.RttSeconds);
+        }
+
         [Test]
         public void OversizedSend_CountsAndLogs_DoesNotThrow()
         {

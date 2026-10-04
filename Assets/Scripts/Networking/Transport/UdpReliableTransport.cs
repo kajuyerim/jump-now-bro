@@ -11,6 +11,7 @@ namespace JumpNowBro.Networking
     public sealed class UdpReliableTransport : IReliableTransport
     {
         const int MaxDatagram = 1200;                 // MTU-safe ceiling; oversized unreliable sends are dropped
+        const int MaxPendingPings = 32;               // covers the sample window even at the 5 Hz handshake cadence
         static readonly HashSet<MessageType> KnownTypes = new HashSet<MessageType>((MessageType[])Enum.GetValues(typeof(MessageType)));
 
         readonly IDatagramChannel channel;
@@ -18,6 +19,7 @@ namespace JumpNowBro.Networking
         readonly ReliableSendQueue sendQueue = new ReliableSendQueue();
         readonly ReliableReceiveBuffer recvBuffer = new ReliableReceiveBuffer();
         readonly RttEstimator rtt = new RttEstimator();
+        readonly List<uint> pendingPingStamps = new List<uint>(MaxPendingPings);
         readonly Queue<(MessageType type, byte[] payload)> inbox = new Queue<(MessageType, byte[])>();
         readonly byte[] scratch = new byte[MaxDatagram];
         double pingInterval;                            // keepalive cadence — v1.2 runs fast (PING only traffic); v1.4 restores 1 Hz once INPUT/STATE flow
@@ -137,6 +139,11 @@ namespace JumpNowBro.Networking
             if (reliable) { scratch[offset++] = (byte)(messageSeq >> 8); scratch[offset++] = (byte)messageSeq; }
             body.CopyTo(scratch.AsSpan(offset));
             channel.Send(scratch.AsSpan(0, offset + body.Length));
+            if (type == MessageType.Ping && !pendingPingStamps.Contains(timestamp))
+            {
+                if (pendingPingStamps.Count == MaxPendingPings) pendingPingStamps.RemoveAt(0);
+                pendingPingStamps.Add(timestamp);
+            }
         }
 
         void Process(byte[] datagram)
@@ -201,7 +208,7 @@ namespace JumpNowBro.Networking
                     SendFramed(MessageType.Pong, 0, ReadOnlySpan<byte>.Empty, h.timestamp);   // echo the sender's stamp
                     break;
                 case MessageType.Pong:
-                    rtt.AddSample(SecondsSince(h.timestamp));
+                    if (pendingPingStamps.Remove(h.timestamp)) rtt.AddSample(SecondsSince(h.timestamp));
                     break;
                 default:
                     if (!KnownTypes.Contains(h.type))               // unknown type: drop AFTER acks + liveness harvested above
