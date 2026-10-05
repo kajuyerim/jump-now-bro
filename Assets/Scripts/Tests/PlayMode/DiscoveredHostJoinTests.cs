@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Net;
 using System.Reflection;
+using System.Text.RegularExpressions;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -87,6 +88,7 @@ namespace JumpNowBro.Tests.PlayMode
         [UnityTest]
         public IEnumerator DiscoveredButtonJoinsAdvertisedPort_ManualJoinUsesDefault_RejoinRetainsPort()
         {
+            Invoke(menu, "DisposeBrowse");
             advertisedHost = new UdpHost();
             defaultHost = new UdpHost();
             Set(client, "gameplayPort", defaultHost.Port);
@@ -145,8 +147,40 @@ namespace JumpNowBro.Tests.PlayMode
         }
 
         [UnityTest]
+        public IEnumerator DiscoveryBindFailure_BacksOff_ThenRecoversWhenPortIsReleased()
+        {
+            Invoke(menu, "DisposeBrowse");
+            using var occupied = new UdpSocket(0);
+            Set(client, "discoveryPort", (ushort)occupied.LocalPort);
+            LogAssert.Expect(LogType.Warning, new Regex(@"LAN discovery could not listen on port \d+: .+ Retrying every 5 seconds\."));
+            Invoke(menu, "Update");
+            yield return null;
+            Assert.IsNull(Get<DiscoveryService>(menu, "browse"));
+
+            // Keep the port occupied through another retry: repeated failures must not spam the Console.
+            yield return new WaitForSecondsRealtime(5.2f);
+            LogAssert.NoUnexpectedReceived();
+            occupied.Dispose();
+            yield return new WaitForSecondsRealtime(1f);
+            Assert.IsNull(Get<DiscoveryService>(menu, "browse"), "releasing the port must not bypass the retry interval");
+
+            float deadline = Time.realtimeSinceStartup + 5f;
+            while (Get<DiscoveryService>(menu, "browse") == null && Time.realtimeSinceStartup < deadline)
+                yield return null;
+            browse = Get<DiscoveryService>(menu, "browse");
+            Assert.IsNotNull(browse, "discovery should recover on the next retry without leaving the menu");
+            Assert.AreEqual(0, browse.Hosts.Count, "an empty LAN is a normal successful discovery state");
+            using var sender = new UdpSocket(0);
+            SendBeacon(sender, new IPEndPoint(IPAddress.Loopback, occupied.LocalPort), new byte[64], 12345);
+            deadline = Time.realtimeSinceStartup + 3f;
+            while (browse.Hosts.Count == 0 && Time.realtimeSinceStartup < deadline) yield return null;
+            Assert.AreEqual(1, browse.Hosts.Count, "the recovered listener must discover real beacons");
+        }
+
+        [UnityTest]
         public IEnumerator DiscoveryMenu_ListsSeveralHosts_AndStaysBoundedDuringFlood()
         {
+            Invoke(menu, "DisposeBrowse");
             Set(client, "discoveryPort", (ushort)0);
             browse = DiscoveryService.StartClient(0);
             Set(menu, "browse", browse);
