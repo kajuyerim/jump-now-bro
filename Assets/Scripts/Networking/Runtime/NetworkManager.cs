@@ -76,7 +76,9 @@ namespace JumpNowBro.Networking
         bool peerReady;                // v2.3: host-side, the client's LobbyReady flag
         bool localReady;               // v2.3: client-side, its own Ready toggle
         bool clientJoinedPostVictory;  // v2.3: WELCOME carried the all-complete sentinel — show CompleteScreen, not the lobby
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
         double nextQualityLog;         // #132 diagnostics: 5 s cadence for the [net-quality] console line
+#endif
         Session.DisconnectReason lostReason;
         string localPlayerName = "";   // #114: this player's display name from the menu (stamped into HELLO/WELCOME)
         ushort? clientHostPort;        // discovered endpoint override; retained for rejoin, null for manual/startup joins
@@ -155,11 +157,13 @@ namespace JumpNowBro.Networking
                 // The EMA, not the raw sample: raw PONGs land at 1 Hz and HOLD between arrivals, so a 2 s
                 // sustain is really just two samples — jitter + sim frame-quantization then false-trips Fair.
                 quality.Tick(Time.deltaTime, transport.RttSeconds, transport.PacketsAccepted, transport.PacketsMissed);
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
                 if (clock >= nextQualityLog && session != null && session.State == Session.SessionState.Established)
                 {
                     nextQualityLog = clock + 5.0;
                     Debug.Log($"[net-quality] {QualityReadout} acc={transport.PacketsAccepted} miss={transport.PacketsMissed} unstable={quality.Unstable}");
                 }
+#endif
             }
             discovery?.Tick(clock);
             if (barrierArmed && clock >= barrierDeadline)                 // ack lost but link maybe alive: resume best-effort, let liveness own a real death
