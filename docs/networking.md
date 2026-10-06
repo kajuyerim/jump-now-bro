@@ -102,6 +102,17 @@ being dropped, the receive loop cannot be crashed by a short packet.
 
 ## Reliability: per-message seq, piggybacked acks, RTT-timed retransmit
 
+`NetworkManager` holds `IReliableTransport` and constructs it through `IReliableTransportFactory`.
+The message interface declares the backlog/drop/loss counters, warning sink and keepalive cadence the
+manager needs. `Session` requests a `SendHelloProbe`; the UDP backend alone decides to reserve message
+sequence 1 and reuse it for retries. A native backend can deliver repeated HELLO messages without
+exposing sequence numbers to the session.
+
+The default factory still accepts a LAN `IDatagramChannel`. It does not abstract UDP binding, peer
+discovery or the host's raw HELLO pre-seeding. Online/Steam support needs a separate connection bootstrap
+and native message transport; its reliability replaces the custom UDP ack/retry layer. The app message
+formats, session handlers and prediction code remain the reusable layer.
+
 Reliability keys on a **stable per-message sequence number**, not the packet-seq the header carries, this
 is what lets a reliable `EVENT` survive loss and out-of-order arrival without head-of-line-blocking the
 unreliable `INPUT`/`STATE` traffic sharing the same socket.

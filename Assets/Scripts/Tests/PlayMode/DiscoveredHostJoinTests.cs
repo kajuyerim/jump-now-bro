@@ -149,6 +149,71 @@ namespace JumpNowBro.Tests.PlayMode
         }
 
         [UnityTest]
+        public IEnumerator Manager_UsesMessageTransportFactory_AndItsDiagnostics()
+        {
+            var previous = client.TransportFactory;
+            var backend = new MessageTransport();
+            try
+            {
+                Set(client, "discoveryPort", (ushort)0);
+                client.TransportFactory = backend;
+                client.BeginClientFromUi("127.0.0.1", "contract-client");
+                float deadline = Time.realtimeSinceStartup + 3f;
+                while (!client.PeerConnected && Time.realtimeSinceStartup < deadline) yield return null;
+                Assert.IsTrue(client.PeerConnected, "The manager must establish through a non-UDP implementation.");
+                Assert.AreSame(backend, client.CurrentTransport);
+                Assert.GreaterOrEqual(backend.Probes, 2, "The backend owns how repeated probes are delivered.");
+                Assert.AreEqual(7, client.PendingReliableCount);
+                Assert.AreEqual(2, client.DroppedDatagrams);
+                Assert.That(client.QualityReadout, Does.Contain("125 ms"));
+                Assert.AreEqual(1.0, backend.PingInterval);
+                LogAssert.Expect(LogType.Warning, "[net] contract warning");
+                backend.Logger("contract warning");
+                backend.Disconnect();
+                Assert.IsTrue(client.ConnectionLost);
+            }
+            finally
+            {
+                client.EndSessionFromUi();
+                client.TransportFactory = previous;
+            }
+        }
+
+        // Message-level backend with no UDP sequencing: reply to the second connection probe.
+        sealed class MessageTransport : IReliableTransport, IReliableTransportFactory
+        {
+            bool welcomed;
+            public int Probes;
+            public double PingInterval;
+            public float RttSeconds => 0.125f;
+            public bool Connected => welcomed;
+            public int PendingReliableCount => 7;
+            public int DroppedDatagrams => 2;
+            public int PacketsAccepted => 12;
+            public int PacketsMissed => 3;
+            public System.Action<string> Logger { get; set; }
+            public event System.Action OnConnected { add { } remove { } }
+            public event System.Action OnDisconnected;
+            public IReliableTransport Create(IDatagramChannel channel) => this;
+            public void SendHelloProbe(System.ReadOnlySpan<byte> payload) => Probes++;
+            public void SetPingInterval(double seconds) => PingInterval = seconds;
+            public void Tick(float dt) { }
+            public void Send(Channel channel, MessageType type, System.ReadOnlySpan<byte> payload) { }
+            public void Disconnect() => OnDisconnected?.Invoke();
+            public bool TryReceive(out MessageType type, out byte[] payload)
+            {
+                type = MessageType.Welcome;
+                payload = null;
+                if (welcomed || Probes < 2) return false;
+                welcomed = true;
+                payload = new byte[128];
+                new Welcome { Magic = SessionProtocol.Magic, Version = SessionProtocol.Version, Accepted = true,
+                    PeerOwner = InputOwner.P2, CurrentSceneIndex = 0xFF, Name = "contract-host" }.Write(payload);
+                return true;
+            }
+        }
+
+        [UnityTest]
         public IEnumerator SummaryHold_PreservesInputEdges_WhileSessionKeepalivesContinue()
         {
             advertisedHost = new UdpHost();

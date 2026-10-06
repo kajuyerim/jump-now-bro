@@ -19,18 +19,24 @@ namespace JumpNowBro.Networking
     {
         void Send(Channel channel, MessageType type, ReadOnlySpan<byte> payload);
 
-        // Send a reliable-typed message with a caller-fixed message-seq, bypassing the retransmit queue.
-        // The handshake uses this so Session can re-probe HELLO on its own connect cadence while holding the
-        // seq constant: the peer's in-order receive buffer dedupes the repeats. A queued (auto-incrementing)
-        // seq would instead stall that buffer, which waits for the gaps left by probes the host missed before
-        // it was listening, so the host would never deliver the probe it actually caught.
-        void SendReliableFixedSeq(MessageType type, ushort messageSeq, ReadOnlySpan<byte> payload);
+        // Start/repeat the client's HELLO while connecting, before any other reliable sends. Repeated
+        // probes must reach a late-starting peer without leaving gaps in later reliable delivery.
+        // The backend owns retry/dedup details; callers do not choose a transport sequence number.
+        void SendHelloProbe(ReadOnlySpan<byte> payload);
 
         // Drained on the main thread; reliable is in-order + de-duplicated, unreliable latest-wins.
         bool TryReceive(out MessageType type, out byte[] payload);
 
         float RttSeconds { get; }
         bool Connected { get; }
+
+        // Per-connection diagnostics. Misses are cumulative and may decrease when reordering is repaired.
+        int PendingReliableCount { get; }
+        int DroppedDatagrams { get; }
+        int PacketsAccepted { get; }
+        int PacketsMissed { get; }
+        Action<string> Logger { get; set; }
+        void SetPingInterval(double seconds);
 
         event Action OnConnected;
         event Action OnDisconnected;

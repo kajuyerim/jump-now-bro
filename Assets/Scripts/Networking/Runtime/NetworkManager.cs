@@ -28,6 +28,7 @@ namespace JumpNowBro.Networking
         public float CurrentRtt => session?.RttSeconds ?? 0f;
         /// Exposed so the #78 spawner can hand the live transport to broadcasters/senders/receivers.
         public IReliableTransport CurrentTransport => transport;
+        public IReliableTransportFactory TransportFactory { get; set; } = new UdpReliableTransportFactory();
         /// The host's last-consumed client tick — the clock the swap scheduler keys apply_at_tick on when hosting.
         public uint HostConsumedClientTick => currentHostRemote != null ? currentHostRemote.LastConsumedClientTick : 0u;
         /// Diagnostics for the connection panel (#91): reliable backlog + malformed-drop count.
@@ -66,7 +67,7 @@ namespace JumpNowBro.Networking
         #pragma warning restore 0649
         DiscoveryService discovery;
         Session session;
-        UdpReliableTransport transport;                                   // kept on the manager so #78 broadcasters/senders can read it via Instance.CurrentTransport
+        IReliableTransport transport;
         ConnectionQualityMonitor quality;                                 // #132: lifetime == transport's (fresh per transport, or deltas go negative on rejoin)
         bool listening;                // host is in the listen-for-HELLO phase
         bool connectionLost;           // #90: a peer drop is being surfaced (paused + overlay) until rejoin/menu
@@ -250,9 +251,7 @@ namespace JumpNowBro.Networking
 #if UNITY_EDITOR
             ch = WrapForSim(inner, hostSide: true);                       // editor-only lag-sim (no-op at Clean)
 #endif
-            transport = new UdpReliableTransport(ch, pingIntervalSeconds: 0.2);      // ~5 Hz keepalive — v1.2's only traffic until #76's Established hook flips to 1 Hz
-            transport.Logger = msg => Debug.LogWarning($"[net] {msg}");              // surface should-never-happen drops (oversized send)
-            quality = new ConnectionQualityMonitor();                                // #132: fresh monitor per transport (counter baselines line up)
+            CreateTransport(ch);
             // Providers sampled at WELCOME-send time so currentSceneIndex reflects the actual scene
             // the host is on (mid-game join case); 0xFF sentinel means "no level loaded yet".
             session = new Session(transport, isHost: true,
@@ -310,9 +309,7 @@ namespace JumpNowBro.Networking
 #if UNITY_EDITOR
             ch = WrapForSim(inner, hostSide: false);                      // editor-only lag-sim (no-op at Clean)
 #endif
-            transport = new UdpReliableTransport(ch, pingIntervalSeconds: 0.2);
-            transport.Logger = msg => Debug.LogWarning($"[net] {msg}");
-            quality = new ConnectionQualityMonitor();                     // #132: fresh monitor per transport
+            CreateTransport(ch);
             session = new Session(transport, isHost: false,
                 localNameProvider: () => localPlayerName,
                 localColorProvider: () => localColorIndex);
@@ -320,6 +317,13 @@ namespace JumpNowBro.Networking
             session.OnWelcomeReceived += OnClientWelcomeReceived;         // mid-game join: load whichever scene host is on
             session.OnGameplayMessage += OnGameplayMessageDispatch;
             session.Start();                                              // sends HELLO; awaits WELCOME
+        }
+
+        void CreateTransport(IDatagramChannel channel)
+        {
+            transport = TransportFactory.Create(channel);
+            transport.Logger = msg => Debug.LogWarning($"[net] {msg}");
+            quality = new ConnectionQualityMonitor(); // counters start fresh for each connection
         }
 
         // Client: ack each completed additive load so the host can lift its barrier. Subscribed once in Start.
