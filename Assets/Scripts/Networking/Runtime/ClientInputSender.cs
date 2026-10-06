@@ -41,6 +41,7 @@ namespace JumpNowBro.Networking
 
         void FixedUpdate()
         {
+            if (LevelManager.Instance != null && LevelManager.Instance.SimGated) return;
             if (!transportAlive || source == null || transport == null || tickClock == null) return;
 
             uint tick = tickClock.Current;

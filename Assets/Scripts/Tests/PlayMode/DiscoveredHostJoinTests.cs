@@ -8,6 +8,8 @@ using UnityEngine.SceneManagement;
 using UnityEngine.TestTools;
 using UnityEngine.UI;
 using JumpNowBro.Networking;
+using JumpNowBro.Gameplay;
+using JumpNowBro.Util;
 
 namespace JumpNowBro.Tests.PlayMode
 {
@@ -144,6 +146,61 @@ namespace JumpNowBro.Tests.PlayMode
             Assert.AreEqual(Session.SessionState.Established, client.CurrentSessionState,
                 "rejoin must retain and redial the discovered gameplay endpoint");
             Assert.AreEqual(advertisedHost.Port, GetNullableUShort(client, "clientHostPort"));
+        }
+
+        [UnityTest]
+        public IEnumerator SummaryHold_PreservesInputEdges_WhileSessionKeepalivesContinue()
+        {
+            advertisedHost = new UdpHost();
+            Set(client, "discoveryPort", (ushort)0);
+            client.BeginClientFromUi("127.0.0.1", "held-input-client", advertisedHost.Port);
+            yield return WaitForEstablished(advertisedHost, 8f);
+            Assert.AreEqual(Session.SessionState.Established, client.CurrentSessionState);
+            var level = LevelManager.Instance;
+            bool previousHold = level.SummaryHold;
+            var go = new GameObject("HeldInputSenderTest");
+            var sender = go.AddComponent<ClientInputSender>();
+            sender.enabled = false; // Invoke exact ticks so the first resumed frame can be inspected.
+            var input = new LatchedInput();
+            sender.Bind(input, client.CurrentTransport, TickClock.Instance);
+            try
+            {
+                level.SummaryHold = true;
+                for (int i = 0; i < 3; i++) Invoke(sender, "FixedUpdate");
+                Assert.AreEqual(0, input.Ticks, "a gated sender must not consume local edges");
+                float deadline = Time.realtimeSinceStartup + 6f; // exceeds the five-second liveness timeout
+                while (Time.realtimeSinceStartup < deadline)
+                {
+                    advertisedHost.Pump(Time.unscaledDeltaTime);
+                    yield return null;
+                }
+                Assert.AreEqual(Session.SessionState.Established, client.CurrentSessionState);
+                Assert.IsFalse(client.ConnectionLost, "summary gating must leave keepalives running");
+                level.SummaryHold = false;
+                Invoke(sender, "FixedUpdate");
+                Assert.IsTrue(sender.LastSampledFrame.jumpPressed);
+                Assert.IsTrue(sender.LastSampledFrame.dashPressed);
+                Assert.AreEqual(1, input.Ticks);
+                Invoke(sender, "FixedUpdate");
+                Assert.IsFalse(sender.LastSampledFrame.jumpPressed, "the edge must be consumed exactly once");
+                Assert.IsFalse(sender.LastSampledFrame.dashPressed);
+            }
+            finally
+            {
+                level.SummaryHold = previousHold;
+                Object.Destroy(go);
+            }
+        }
+
+        sealed class LatchedInput : IInputSource
+        {
+            public int Ticks;
+            public bool MoveLeft => false;
+            public bool MoveRight => false;
+            public bool JumpPressed => Ticks == 0;
+            public bool JumpHeld => true;
+            public bool DashPressed => Ticks == 0;
+            public void Tick() => Ticks++;
         }
 
         [UnityTest]
