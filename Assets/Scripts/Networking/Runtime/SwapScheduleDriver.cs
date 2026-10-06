@@ -19,9 +19,6 @@ namespace JumpNowBro.Networking
 
         // Telegraph + network slack before a swap applies, in client ticks. Floored for a readable telegraph,
         // raised toward the RTT when hosting, capped. v1.7 re-tunes under lag-sim.
-        const int BaseLeadTicks = 9;     // ~0.15 s at 60 Hz
-        const int LeadFloor     = 6;     // ~0.1 s
-        const int LeadCap       = 20;
 
         public PendingSwapScheduler Scheduler { get; } = new PendingSwapScheduler();
 
@@ -130,11 +127,11 @@ namespace JumpNowBro.Networking
 
         int Lead()
         {
-            int lead = BaseLeadTicks;
+            int lead = NetworkTuning.TelegraphBaseLeadTicks;
             var nm = NetworkManager.Instance;
             if (nm != null && nm.Role == GameRole.Hosting)
                 lead = Mathf.Max(lead, Mathf.CeilToInt(nm.CurrentRtt / Time.fixedDeltaTime) + 2);
-            return Mathf.Clamp(lead, LeadFloor, LeadCap);
+            return Mathf.Clamp(lead, NetworkTuning.TelegraphLeadFloor, NetworkTuning.TelegraphLeadCap);
         }
     }
 }

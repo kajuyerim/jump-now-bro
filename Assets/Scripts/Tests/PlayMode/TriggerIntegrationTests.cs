@@ -65,6 +65,39 @@ namespace JumpNowBro.Tests.PlayMode
             playerGo.GetComponent<Rigidbody2D>().useFullKinematicContacts = true;
         }
 
+        [Test]
+        public void GhostIntent_IgnoresDestroyedInterfaceSource()
+        {
+            var go = new GameObject("DestroyedIntentSourceTest");
+            var source = go.AddComponent<NetworkRemoteInputSource>();
+            try
+            {
+                SetField(source, "current", new PlayerInputFrame { moveRight = true, jumpHeld = true });
+                IInputSource input = source;
+                Assert.IsTrue(GhostIntentSources.From(input).right);
+                Object.DestroyImmediate(source);
+                Assert.IsFalse(GhostIntentSources.From(input).right);
+                Assert.IsFalse(GhostIntentSources.From(input).jumpHeld);
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        [Test]
+        public void Tuning_ClampsFreezeTicksWithoutWrapping()
+        {
+            var tuning = ScriptableObject.CreateInstance<PlayerTuning>();
+            try
+            {
+                tuning.dashFreezeFrameDuration = 0.05f;
+                Assert.AreEqual(3, tuning.AsMovementTuning(0.02f, -20).dashFreezeTicks);
+                tuning.dashFreezeFrameDuration = 10f;
+                Assert.AreEqual(sbyte.MaxValue, tuning.AsMovementTuning(0.02f, -20).dashFreezeTicks);
+                tuning.dashFreezeFrameDuration = -1f;
+                Assert.AreEqual(0, tuning.AsMovementTuning(0.02f, -20).dashFreezeTicks);
+            }
+            finally { Object.DestroyImmediate(tuning); }
+        }
+
         [UnityTest]
         public IEnumerator RemoteInput_DiscardsDeathFreezeEdges_AndAcceptsFirstLivePress()
         {

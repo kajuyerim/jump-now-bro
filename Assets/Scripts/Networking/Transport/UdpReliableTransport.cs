@@ -40,7 +40,7 @@ namespace JumpNowBro.Networking
         int droppedDatagrams;                           // malformed / unknown-type inbound, dropped after ack-harvest (diagnostic)
         int oversizedSends;                             // outbound bodies over the MTU ceiling, dropped (diagnostic)
 
-        public UdpReliableTransport(IDatagramChannel channel, double pingIntervalSeconds = 1.0, double silenceTimeoutSeconds = 5.0)
+        public UdpReliableTransport(IDatagramChannel channel, double pingIntervalSeconds = 1.0, double silenceTimeoutSeconds = NetworkTuning.SilenceTimeoutSeconds)
         {
             this.channel = channel;
             pingInterval = pingIntervalSeconds;

@@ -11,8 +11,9 @@ CI-testable and locked by a 300-tick golden master (see [Architecture](architect
 
 The shared-control mechanic is implemented as pure data: a host-owned `ControlMap` routes two raw input
 frames into one `EffectiveInput`, and `SwapTrigger` volumes flip ownership mid-level. Keeping the map
-host-authoritative (the client's copy is HUD-only) means the simulation never reads a value that could be
-stale across the wire. The trigger fires a **static** cross-assembly event, so `Gameplay` never has to
+host-authoritative means only the host commits ownership changes. The client uses its synchronized copy
+for both prediction and the HUD, then reconciles against authoritative state. The trigger fires a
+**static** cross-assembly event, so `Gameplay` never has to
 reference the `Networking` assembly, preserving the clean Phase 1 / Phase 2 boundary.
 
 ```mermaid

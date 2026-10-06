@@ -24,6 +24,7 @@ namespace JumpNowBro.Util
                 case PlayerAction.MoveHorizontal: result.moveOwner = Flip(result.moveOwner); break;
                 case PlayerAction.Jump:           result.jumpOwner = Flip(result.jumpOwner); break;
                 case PlayerAction.Dash:           result.dashOwner = Flip(result.dashOwner); break;
+                default: throw new ArgumentOutOfRangeException(nameof(action), action, "Unknown player action.");
             }
             return result;
         }

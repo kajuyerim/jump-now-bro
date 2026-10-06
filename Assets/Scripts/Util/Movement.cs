@@ -7,15 +7,11 @@ namespace JumpNowBro.Util
     /// can stand on. State machine + jump/cut/coyote/buffer + dash/freeze + gravity integration are
     /// all here; axis-separated Y-then-X sweep is delegated to ICollisionWorld.
     ///
-    /// `sweep = false` skips the SweepX/Y calls and leaves velocity un-zeroed on block. Used at #69
-    /// where the Dynamic body's Box2D solver still handles collision and we'd otherwise diverge from
-    /// v0.4-mvp on first-contact ticks (vel zeroed → Box2D moves nothing → player ends tick up to
-    /// runSpeed·dt short of the wall, busts the #72 A/B tolerance). At #70 onwards, sweep = true.
     public static class Movement
     {
         public static (MovementState, EdgeFlags) Step(
             in MovementState s_in, in EffectiveInput input, in MovementTuning t,
-            float dt, ICollisionWorld world, bool sweep = true)
+            float dt, ICollisionWorld world)
         {
             var s = s_in;
             EdgeFlags edges = EdgeFlags.None;
@@ -105,25 +101,22 @@ namespace JumpNowBro.Util
                 s.velY -= t.gravity * dt;
             }
 
-            if (sweep)
-            {
-                world.SweepY(s.posX, s.posY, s.velY * dt, out float resolvedDy, out bool blockedY);
-                if (blockedY) s.velY = 0f;
-                s.posY += resolvedDy;
+            world.SweepY(s.posX, s.posY, s.velY * dt, out float resolvedDy, out bool blockedY);
+            if (blockedY) s.velY = 0f;
+            s.posY += resolvedDy;
 
-                float wantDx = s.velX * dt;
-                world.SweepX(s.posX, s.posY, wantDx, out float resolvedDx, out bool blockedX);
-                if (blockedX) s.velX = 0f;
-                s.posX += resolvedDx;
+            float wantDx = s.velX * dt;
+            world.SweepX(s.posX, s.posY, wantDx, out float resolvedDx, out bool blockedX);
+            if (blockedX) s.velX = 0f;
+            s.posX += resolvedDx;
 
-                // #102 corner correction. Airborne, pushing horizontally, and both axes blocked: that's
-                // either a corner-on-corner wedge or flush against a full wall. A small upward lift that
-                // frees the horizontal move distinguishes them — only a corner clears, so we lift over it
-                // instead of sticking. A full-height wall never frees (no-op), and flat ground never blocks
-                // X, so WallStop_RunningRight and the v1.3 golden master are unchanged.
-                if (blockedX && blockedY && !grounded && input.moveDir != 0)
-                    CornerCorrect(ref s, wantDx, world);
-            }
+            // #102 corner correction. Airborne, pushing horizontally, and both axes blocked: that's
+            // either a corner-on-corner wedge or flush against a full wall. A small upward lift that
+            // frees the horizontal move distinguishes them — only a corner clears, so we lift over it
+            // instead of sticking. A full-height wall never frees (no-op), and flat ground never blocks
+            // X, so WallStop_RunningRight and the v1.3 golden master are unchanged.
+            if (blockedX && blockedY && !grounded && input.moveDir != 0)
+                CornerCorrect(ref s, wantDx, world);
 
             s.wasJumpHeld = input.jumpHeld;
             return (s, edges);

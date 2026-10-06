@@ -37,6 +37,17 @@ namespace JumpNowBro.Gameplay
         {
             if (Instance != null && Instance != this) { Destroy(gameObject); return; }
             Instance = this;
+            DontDestroyOnLoad(gameObject);
+        }
+
+        void OnDestroy() { if (Instance == this) Instance = null; }
+
+        public void DespawnCurrentPlayer()
+        {
+            if (currentPlayer != null) currentPlayer.OnDeath -= HandlePlayerDeath;
+            if (currentPlayerInstance != null) Destroy(currentPlayerInstance);
+            currentPlayer = null;
+            currentPlayerInstance = null;
         }
 
         void OnEnable()
@@ -73,15 +84,8 @@ namespace JumpNowBro.Gameplay
             // Gate on the GameObject ref, not the PlayerController component — the client wiring destroys
             // the controller, so a `currentPlayer != null` check evaporates to fake-null and the previous
             // Player(Clone) stays alive across level loads (one extra clone per level — the bug seen at #78).
-            if (currentPlayerInstance != null)
-            {
-                if (currentPlayer != null)
-                {
-                    accumulatedDeaths += currentPlayer.DeathCount;
-                    currentPlayer.OnDeath -= HandlePlayerDeath;
-                }
-                Destroy(currentPlayerInstance);
-            }
+            if (currentPlayer != null) accumulatedDeaths += currentPlayer.DeathCount;
+            DespawnCurrentPlayer();
 
             var instance = Instantiate(playerPrefab, spawnPoint.transform.position, Quaternion.identity);
             currentPlayerInstance = instance;
@@ -102,8 +106,10 @@ namespace JumpNowBro.Gameplay
         // through a single source — same path the client takes via STATE-delta in ClientStateRenderer.
         // Raise with cumulative TotalDeaths (not per-level) so HUD survives level transitions and the
         // client receives the same number via STATE.deathCount (which the host's broadcaster reads here).
-        void HandlePlayerDeath(int deathCount) =>
-            DeathNotifier.Instance?.Raise(TotalDeaths);
+        void HandlePlayerDeath(int deathCount)
+        {
+            if (DeathNotifier.Instance != null) DeathNotifier.Instance.Raise(TotalDeaths);
+        }
 
         PlayerSpawnPoint FindSpawnPointInScene(Scene scene)
         {

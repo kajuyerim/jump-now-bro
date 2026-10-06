@@ -58,6 +58,13 @@ namespace JumpNowBro.Tests
             Assert.AreEqual(InputOwner.P2, dashSwap.dashOwner);
         }
 
+        [Test]
+        public void WithSwap_UnknownAction_Throws()
+        {
+            Assert.Throws<System.ArgumentOutOfRangeException>(
+                () => ControlMap.WithSwap(ControlMap.Default, (PlayerAction)99));
+        }
+
         // ---- Route ----
 
         static PlayerInputFrame Frame(bool left = false, bool right = false,

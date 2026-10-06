@@ -13,7 +13,6 @@ namespace JumpNowBro.Networking
     ///
     /// Runs only when the host is actually hosting (defense in depth — #78 spawner only attaches this
     /// component on Hosting role, but the role check stays for robustness).
-    [DefaultExecutionOrder(50)]
     public sealed class NetworkStateBroadcaster : MonoBehaviour
     {
         PlayerController controller;

@@ -72,8 +72,8 @@ Gameplay.)
 ## Testing & CI
 
 The whole core is engine-free precisely so it can be tested **without a Unity license**. A GitHub Actions
-workflow runs three license-free jobs, each defending a different invariant: `dotnet test` over **239
-plain-NUnit tests** (the same files Unity runs, zero `[UnityTest]`) on net8.0, a **netstandard2.1
+workflow runs three license-free jobs, each defending a different invariant: `dotnet test` over the
+plain-NUnit EditMode tests (the same files Unity runs, zero `[UnityTest]`) on net8.0, a **netstandard2.1
 compile-only** job that catches net8.0-only API calls Unity's NS2.1 would reject, and a `.meta`-pairing
 check. Both compile jobs glob the production sources and explicitly **exclude `Networking/Runtime`**, so the
 day any non-Runtime file imports `UnityEngine` the build breaks. The engine boundary is enforced
@@ -89,7 +89,7 @@ than the game ships on.
 ```mermaid
 flowchart LR
   SRC["Production sources: Util/** + Networking/** (Runtime/ excluded)"]
-  TESTS["Tests/EditMode/**, 239 plain (Test) cases, 0 (UnityTest)"]
+  TESTS["Tests/EditMode/**, plain (Test) cases, 0 (UnityTest)"]
   subgraph JOBS["GitHub Actions, runs-on ubuntu, no Unity license"]
     direction TB
     J1["core-tests: dotnet test, net8.0 + NUnit 3"]
@@ -113,6 +113,13 @@ flowchart LR
 In-editor **PlayMode tests** exercise the Physics2D-dependent paths (real prefab/scene loading, trigger
 firing) that can't run headless; they live under `Tests/PlayMode/` and run in the Unity Test Runner.
 
+## Project settings
+
+Built-in engine analytics submission is disabled. Unused authoring packages and native modules are
+removed; Terrain remains because URP's core package requires it. The game uses the Input System only;
+the legacy Rendering Debugger axes are inert. Renderers intentionally share the Default sorting layer
+and use explicit order values, so adding sorting layers is a visual design change rather than cleanup.
+
 ## Project structure
 
 ```
@@ -130,7 +137,7 @@ Assets/Scripts/
                         SwapScheduleDriver, TickClock, MainMenuUI, ConnectionUI
   Gameplay/             PlayerController, ControlMap store, SwapTrigger, Checkpoint, Hazard,
                         LevelGoal, LevelManager, PlayerSpawner, UnityCollisionWorld
-  Tests/EditMode/       239 plain-NUnit tests (run in Unity + headless CI), incl. golden master
+  Tests/EditMode/       plain-NUnit tests (run in Unity + headless CI), incl. golden master
   Tests/PlayMode/       in-editor integration tests
 Assets/Scenes/          Bootstrap + Level_01/02/03
 ci/                     hand-maintained no-Unity test/api-check csproj + check-meta.sh

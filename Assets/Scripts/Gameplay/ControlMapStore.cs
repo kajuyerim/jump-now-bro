@@ -22,8 +22,7 @@ namespace JumpNowBro.Gameplay
             DontDestroyOnLoad(gameObject);
         }
 
-        // Single mutation choke point. SwapTrigger is the only caller in Phase 1;
-        // Phase 2's host wraps this to also enqueue a reliable SWAP EVENT.
+        // Publishes map changes from scheduled swaps, session sync, respawn and level resets.
         public void Apply(ControlMap newMap)
         {
             Current = newMap;

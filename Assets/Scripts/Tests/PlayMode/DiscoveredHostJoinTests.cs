@@ -179,11 +179,49 @@ namespace JumpNowBro.Tests.PlayMode
             }
         }
 
+        [Test]
+        public void ManagerTeardown_ReleasesSocketAndSubscriptions_WhenGoodbyeThrows()
+        {
+            var backend = new MessageTransport();
+            var previous = client.TransportFactory;
+            bool wasEnabled = client.enabled;
+            try
+            {
+                Set(client, "discoveryPort", (ushort)0);
+                client.TransportFactory = backend;
+                client.BeginClientFromUi("127.0.0.1", "cleanup-client");
+                int port = Get<UdpSocket>(client, "gameplaySocket").LocalPort;
+                backend.ThrowOnSend = true;
+                LogAssert.Expect(LogType.Exception, new Regex("InvalidOperationException: test goodbye failure"));
+                // MainMenuUI requires this component; exercise teardown without removing Bootstrap's manager.
+                client.enabled = false;
+                Invoke(client, "OnDestroy");
+                Assert.IsNull(NetworkManager.Instance);
+                using (var rebound = new UdpSocket(port)) Assert.AreEqual(port, rebound.LocalPort);
+                foreach (string eventName in new[] { "OnBeforeLevelLoad", "OnLevelLoaded" })
+                {
+                    var handlers = Get<System.Delegate>(LevelManager.Instance, eventName);
+                    foreach (var handler in handlers?.GetInvocationList() ?? new System.Delegate[0])
+                        Assert.AreNotSame(client, handler.Target, "Destroyed managers must unsubscribe.");
+                }
+            }
+            finally
+            {
+                backend.ThrowOnSend = false;
+                client.EndSessionFromUi();
+                client.TransportFactory = previous;
+                Invoke(client, "Awake");
+                Invoke(client, "Start");
+                client.enabled = wasEnabled;
+            }
+        }
+
         // Message-level backend with no UDP sequencing: reply to the second connection probe.
         sealed class MessageTransport : IReliableTransport, IReliableTransportFactory
         {
             bool welcomed;
             public int Probes;
+            public bool ThrowOnSend;
             public double PingInterval;
             public float RttSeconds => 0.125f;
             public bool Connected => welcomed;
@@ -198,7 +236,10 @@ namespace JumpNowBro.Tests.PlayMode
             public void SendHelloProbe(System.ReadOnlySpan<byte> payload) => Probes++;
             public void SetPingInterval(double seconds) => PingInterval = seconds;
             public void Tick(float dt) { }
-            public void Send(Channel channel, MessageType type, System.ReadOnlySpan<byte> payload) { }
+            public void Send(Channel channel, MessageType type, System.ReadOnlySpan<byte> payload)
+            {
+                if (ThrowOnSend) throw new System.InvalidOperationException("test goodbye failure");
+            }
             public void Disconnect() => OnDisconnected?.Invoke();
             public bool TryReceive(out MessageType type, out byte[] payload)
             {

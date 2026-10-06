@@ -8,8 +8,7 @@ namespace JumpNowBro.Networking
     /// On a false return the read is all-or-nothing — Position only advances on success.
     public ref struct ByteReader
     {
-        /// Hard cap on a length-prefixed string. Only the discovery beacon's game name uses TryReadString,
-        /// so a multi-KB length prefix is always hostile/garbage — reject it before allocating.
+        /// Hard cap for discovery game names and HELLO/WELCOME display names; reject before allocating.
         public const int MaxStringLength = 256;
 
         readonly ReadOnlySpan<byte> buf;

@@ -184,7 +184,7 @@ namespace JumpNowBro.Networking
         {
             if (levelButtons != null) return;
             int count = LevelManager.Instance != null ? LevelManager.Instance.LevelCount : 0;
-            if (count <= 0) { levelButtons = new Button[0]; levelButtonLabels = new TMP_Text[0]; return; }
+            if (count <= 0) return;
             levelButtons = new Button[count];
             levelButtonLabels = new TMP_Text[count];
             for (int i = 0; i < count; i++)
@@ -218,6 +218,7 @@ namespace JumpNowBro.Networking
 
         void Refresh(NetworkManager net)
         {
+            EnsureLevelButtons();
             bool hosting = net.Role == GameRole.Hosting;
 
             // Host card: identity is always known locally (menu entry / WELCOME).

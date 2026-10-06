@@ -317,7 +317,13 @@ namespace JumpNowBro.Gameplay
             }
             recordsResetArmedUntil = 0f;
             recordsResetLabel.text = RecordsResetIdle;
-            GameRecords.ResetAll(LevelManager.Instance != null ? LevelManager.Instance.LevelCount : 8);
+            var level = LevelManager.Instance;
+            if (level == null || level.LevelCount == 0)
+            {
+                recordsStatus.text = "Records unavailable until the level list is loaded";
+                return;
+            }
+            GameRecords.ResetAll(level.LevelCount);
             recordsStatus.text = "Records + lifetime cleared";
             RefreshLifetimeLine();
         }

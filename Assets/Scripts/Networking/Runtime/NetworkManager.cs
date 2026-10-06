@@ -68,6 +68,9 @@ namespace JumpNowBro.Networking
         DiscoveryService discovery;
         Session session;
         IReliableTransport transport;
+        PlayerSpawner subscribedSpawner;
+        LevelManager subscribedLevel;
+        RunSummaryController subscribedSummary;
         ConnectionQualityMonitor quality;                                 // #132: lifetime == transport's (fresh per transport, or deltas go negative on rejoin)
         bool listening;                // host is in the listen-for-HELLO phase
         bool connectionLost;           // #90: a peer drop is being surfaced (paused + overlay) until rejoin/menu
@@ -98,7 +101,6 @@ namespace JumpNowBro.Networking
         bool barrierArmed;
         int barrierScene;
         double barrierDeadline;
-        const double BarrierTimeoutSeconds = 2.0;   // < the 5 s liveness teardown: a truly dead peer is handled there, not here
 
         void Awake()
         {
@@ -122,7 +124,7 @@ namespace JumpNowBro.Networking
             }
             catch (System.Exception e)
             {
-                Debug.LogError($"NetworkManager: failed to start as {Role} — {e.Message}");
+                Debug.LogError($"NetworkManager: failed to start as {Role} — {e}");
                 EndSessionFromUi();                                       // unwind any partial init and reset so the ConnectionUI stays usable
             }
         }
@@ -131,17 +133,18 @@ namespace JumpNowBro.Networking
         {
             // Subscriptions live for the manager's lifetime — fires for any role. Handlers themselves
             // check Role at call time (so a BeginHostingFromUi flip later in the session works).
-            var spawner = FindAnyObjectByType<PlayerSpawner>();
-            if (spawner != null) spawner.OnPlayerSpawned += OnPlayerSpawnedDispatch;
-            if (LevelManager.Instance != null)
+            subscribedSpawner = FindAnyObjectByType<PlayerSpawner>();
+            if (subscribedSpawner != null) subscribedSpawner.OnPlayerSpawned += OnPlayerSpawnedDispatch;
+            subscribedLevel = LevelManager.Instance;
+            if (subscribedLevel != null)
             {
-                LevelManager.Instance.OnBeforeLevelLoad += OnLevelLoadBegin;
-                LevelManager.Instance.OnLevelLoaded += OnClientLevelLoaded;
+                subscribedLevel.OnBeforeLevelLoad += OnLevelLoadBegin;
+                subscribedLevel.OnLevelLoaded += OnClientLevelLoaded;
             }
             // #130: the summary EVENT goes out at GOAL TOUCH (not at Continue's LoadNext) so the client's
             // card shows through the hold; reliable in-order delivery lands it before the later LevelLoad.
-            if (RunSummaryController.Instance != null)
-                RunSummaryController.Instance.OnRunCompleted += HandleRunCompleted;
+            subscribedSummary = RunSummaryController.Instance;
+            if (subscribedSummary != null) subscribedSummary.OnRunCompleted += HandleRunCompleted;
         }
 
         void HandleRunCompleted(int level, LevelRunStats stats) => SendRunSummaryEvent((byte)level, stats);
@@ -176,15 +179,28 @@ namespace JumpNowBro.Networking
 
         void OnDestroy()
         {
-            var s = session;                                              // capture: SendGoodbye -> SetState -> OnStateChanged nulls the field
-            if (s != null)
+            if (subscribedSpawner != null) subscribedSpawner.OnPlayerSpawned -= OnPlayerSpawnedDispatch;
+            if (subscribedLevel != null)
             {
-                s.SendGoodbye(GoodbyeReason.Normal);                      // queue a graceful GOODBYE...
-                s.Tick(0);                                                // ...and flush it (firstSend ignores RTO)
+                subscribedLevel.OnBeforeLevelLoad -= OnLevelLoadBegin;
+                subscribedLevel.OnLevelLoaded -= OnClientLevelLoaded;
             }
-            discovery?.Dispose();
-            gameplaySocket?.Dispose();                                    // kills the background receive thread on play-stop
-            if (Instance == this) Instance = null;
+            if (subscribedSummary != null) subscribedSummary.OnRunCompleted -= HandleRunCompleted;
+            try
+            {
+                var s = session; // SendGoodbye may clear the manager's session field via OnStateChanged.
+                if (s != null) { s.SendGoodbye(GoodbyeReason.Normal); s.Tick(0); }
+            }
+            catch (Exception e) { Debug.LogException(e, this); }
+            finally
+            {
+                try { discovery?.Dispose(); }
+                finally
+                {
+                    try { gameplaySocket?.Dispose(); }
+                    finally { if (Instance == this) Instance = null; }
+                }
+            }
         }
 
 #if UNITY_EDITOR
@@ -527,7 +543,7 @@ namespace JumpNowBro.Networking
             {
                 barrierArmed = true;
                 barrierScene = sceneIndex;
-                barrierDeadline = clock + BarrierTimeoutSeconds;
+                barrierDeadline = clock + NetworkTuning.LevelBarrierTimeoutSeconds;
                 lm.SimPaused = true;
             }
         }
@@ -548,8 +564,7 @@ namespace JumpNowBro.Networking
             var lm = LevelManager.Instance;
             if (lm != null)
                 lobbySelectedLevel = Mathf.Clamp(lm.CurrentLevelIndex, 0, Mathf.Max(0, lm.LevelCount - 1));
-            if (PlayerSpawner.Instance != null && PlayerSpawner.Instance.CurrentPlayerInstance != null)
-                Destroy(PlayerSpawner.Instance.CurrentPlayerInstance);
+            if (PlayerSpawner.Instance != null) PlayerSpawner.Instance.DespawnCurrentPlayer();
             currentHostRemote = null;
             lm?.ResetIndex();                                            // index < 0 -> InLobby true, lobby shows
             if (lm != null) lm.SimPaused = false;
@@ -782,7 +797,7 @@ namespace JumpNowBro.Networking
             Role = GameRole.Hosting;
             Application.runInBackground = true;
             try { BeginHosting(); }
-            catch (System.Exception e) { Debug.LogError($"BeginHosting failed: {e.Message}"); EndSessionFromUi(); }
+            catch (System.Exception e) { Debug.LogError($"BeginHosting failed: {e}"); EndSessionFromUi(); }
         }
 
         public void BeginClientFromUi(string hostIp, string playerName = null, ushort? hostPort = null)
@@ -797,7 +812,7 @@ namespace JumpNowBro.Networking
             clientHostPort = hostPort;
             Application.runInBackground = true;
             try { BeginClient(); }
-            catch (System.Exception e) { Debug.LogError($"BeginClient failed: {e.Message}"); EndSessionFromUi(); }
+            catch (System.Exception e) { Debug.LogError($"BeginClient failed: {e}"); EndSessionFromUi(); }
         }
 
         /// Client: reconnect to the same host after a connection loss, resuming into the host's current level via
@@ -810,8 +825,7 @@ namespace JumpNowBro.Networking
             // Leave→Join mid-game-join path, minus the return to SinglePlayer. Without this, the old Player stays
             // bound to the dead transport (its sender/renderer never reach the new socket) and rejoin "connects"
             // but the character is frozen — especially against a re-hosted host (the #104 stale-wiring case).
-            if (PlayerSpawner.Instance != null && PlayerSpawner.Instance.CurrentPlayerInstance != null)
-                Destroy(PlayerSpawner.Instance.CurrentPlayerInstance);
+            if (PlayerSpawner.Instance != null) PlayerSpawner.Instance.DespawnCurrentPlayer();
             currentClientRenderer = null;
             // #130: drop a stale hold (it would freeze the reloaded level) but KEEP totals + the accounting
             // latch — this client resumes the same run, and the host re-sends the summary if still holding.
@@ -821,7 +835,7 @@ namespace JumpNowBro.Networking
             discovery?.Dispose(); discovery = null;
             gameplaySocket?.Dispose(); gameplaySocket = null;            // dispose the stale socket before BeginClient opens a new one
             try { BeginClient(); }
-            catch (System.Exception e) { Debug.LogError($"Rejoin failed: {e.Message}"); EndSessionFromUi(); }
+            catch (System.Exception e) { Debug.LogError($"Rejoin failed: {e}"); EndSessionFromUi(); }
         }
 
         public void EndSessionFromUi()
@@ -833,8 +847,7 @@ namespace JumpNowBro.Networking
             // NetworkStateBroadcaster fire on every FixedUpdate; if they're still alive when the
             // socket goes away, they'd throw ObjectDisposedException on next Send. Destroying the
             // GameObject removes all of them in one stroke.
-            if (PlayerSpawner.Instance != null && PlayerSpawner.Instance.CurrentPlayerInstance != null)
-                Destroy(PlayerSpawner.Instance.CurrentPlayerInstance);
+            if (PlayerSpawner.Instance != null) PlayerSpawner.Instance.DespawnCurrentPlayer();
             currentHostRemote = null;
             currentClientRenderer = null;
 

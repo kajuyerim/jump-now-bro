@@ -20,10 +20,6 @@ namespace JumpNowBro.Networking
         // Self-throttle: nothing else rate-limits, and the reliable queue silently drops past 64 in flight.
         const float SendCooldown = 0.45f;
 
-        // SwapScheduleDriver's lead constants, duplicated: comms may not couple to the swap driver's privates.
-        const int BaseLeadTicks = 9;        // ~0.15 s at 60 Hz
-        const int LeadFloor     = 6;
-        const int LeadCap       = 20;
 
         float nextKeySendTime;              // keys 1-4 share one bucket (a re-press inside it is spam)
         float nextPingSendTime;             // pings get their own bucket — a callout must not lock out an immediate "here"
@@ -274,11 +270,11 @@ namespace JumpNowBro.Networking
         // CurrentRtt is fed by PING/PONG on the client too. Solo reads 0 RTT and takes the base lead.
         int Lead()
         {
-            int lead = BaseLeadTicks;
+            int lead = NetworkTuning.TelegraphBaseLeadTicks;
             var nm = NetworkManager.Instance;
             if (nm != null && nm.Role != GameRole.SinglePlayer)
                 lead = Mathf.Max(lead, Mathf.CeilToInt(nm.CurrentRtt / Time.fixedDeltaTime) + 2);
-            return Mathf.Clamp(lead, LeadFloor, LeadCap);
+            return Mathf.Clamp(lead, NetworkTuning.TelegraphLeadFloor, NetworkTuning.TelegraphLeadCap);
         }
 
         static void ShowCallout(InputOwner sender, CalloutId id)

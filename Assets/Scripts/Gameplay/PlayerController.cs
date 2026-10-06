@@ -130,7 +130,7 @@ namespace JumpNowBro.Gameplay
 
             var movementTuning = tuning.AsMovementTuning(dt, fallLimitY);            // rebuilt every tick so Inspector live-tune still works
 
-            // sweep:true at #70 — body is Kinematic; Movement.Step's swept position is authoritative.
+            // The body is Kinematic; Movement.Step's swept position is authoritative.
             var (newState, edges) = Movement.Step(currentState, input, movementTuning, dt, collisionWorld);
 
             if ((edges & EdgeFlags.DiedThisTick) != 0)                               // fall-limit → Die() routes through the existing 0.4s respawn coroutine
