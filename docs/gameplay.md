@@ -38,6 +38,10 @@ with **variable height** (release-to-halve while rising), **coyote time** and **
 Wall jump/climb and 8-way dash are explicitly out of scope to keep the state machine small and the netcode
 surface honest, the dash is horizontal-only for the MVP.
 
+A dash that touches ground and finishes airborne grants the same 0.1-second coyote window as a walk-off.
+A dash spent entirely in the air grants no extra jump. Ground contact is stored in the movement snapshot
+so client reconciliation preserves this distinction; the dash charge stays spent until landing.
+
 ```mermaid
 stateDiagram-v2
     [*] --> Falling

@@ -40,7 +40,7 @@ namespace JumpNowBro.Util
             switch (s.state)
             {
                 case MoveState.Grounded:
-                    if (input.dashPressed && s.dashChargeAvailable) FireDash(ref s, t, ref edges);
+                    if (input.dashPressed && s.dashChargeAvailable) FireDash(ref s, t, grounded, ref edges);
                     else if (jumpAllowed) FireJump(ref s, t, ref edges);
                     else if (!grounded)
                     {
@@ -50,7 +50,7 @@ namespace JumpNowBro.Util
                     break;
 
                 case MoveState.Jumping:
-                    if (input.dashPressed && s.dashChargeAvailable) FireDash(ref s, t, ref edges);
+                    if (input.dashPressed && s.dashChargeAvailable) FireDash(ref s, t, grounded, ref edges);
                     else
                     {
                         if (s.velY > 0f && !input.jumpHeld && s.wasJumpHeld)
@@ -69,11 +69,12 @@ namespace JumpNowBro.Util
                         s.dashChargeAvailable = true;                                    // refund dash charge on land (line 147)
                         edges |= EdgeFlags.LandedThisTick;
                     }
-                    if (input.dashPressed && s.dashChargeAvailable) FireDash(ref s, t, ref edges);
+                    if (input.dashPressed && s.dashChargeAvailable) FireDash(ref s, t, grounded, ref edges);
                     else if (jumpAllowed) FireJump(ref s, t, ref edges);
                     break;
 
                 case MoveState.Dashing:
+                    s.dashTouchedGround |= grounded;
                     if (s.freezeTicksRemaining > 0)
                     {
                         s.velX = 0f; s.velY = 0f;
@@ -87,7 +88,12 @@ namespace JumpNowBro.Util
                     else
                     {
                         s.dashTimer = MathF.Max(0f, s.dashTimer - dt);
-                        if (s.dashTimer <= 0f) s.state = MoveState.Falling;
+                        if (s.dashTimer <= 0f)
+                        {
+                            s.state = MoveState.Falling;
+                            if (s.dashTouchedGround && !grounded) s.coyoteTimer = t.coyoteTime;
+                            s.dashTouchedGround = false;
+                        }
                     }
                     break;
             }
@@ -132,9 +138,10 @@ namespace JumpNowBro.Util
             edges |= EdgeFlags.JumpedThisTick;
         }
 
-        static void FireDash(ref MovementState s, in MovementTuning t, ref EdgeFlags edges)
+        static void FireDash(ref MovementState s, in MovementTuning t, bool grounded, ref EdgeFlags edges)
         {
             s.state = MoveState.Dashing;
+            s.dashTouchedGround = grounded;
             s.freezeTicksRemaining = t.dashFreezeTicks;
             s.dashTimer = t.dashDuration;
             s.invulnTimer = t.dashInvulnerabilityDuration;

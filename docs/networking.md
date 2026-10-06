@@ -88,10 +88,12 @@ callout id, `WorldPing` = an x/y f32 world marker, `Countdown` = a u32 GO-beat t
 direction alone identifies the sender, no sender byte on the wire. `Countdown` reuses the client-input-tick
 coordinate that swaps apply on, so the GO beat lands on the same logical tick on both screens; the trio
 bumped the protocol to **v5**, since a v4 peer's read boundary silently drops every comms kind and would
-leave the signals one-sided). The wire formats are **forward-compatible by
+leave the signals one-sided). **v6** adds `dashTouchedGround` in bit 3 of `MovementState`'s flags byte
+(offset 35), preserving the 46-byte layout. The handshake rejects older peers because both simulations
+must apply the same dash-coyote rule, even though old readers can ignore the bit. The wire formats are **forward-compatible by
 reserve-and-tolerate**, `MovementState`'s trailing padding bytes and the input frame's reserved bits let a
-newer sender append fields an older reader silently ignores, so new facts go on the wire without a version
-bump. Every deserializer is bounds-checked and **returns `false` instead of throwing** on a short or
+newer sender append fields an older reader silently ignores. Additions that change simulation or session
+behavior still require a version bump. Every deserializer is bounds-checked and **returns `false` instead of throwing** on a short or
 malformed buffer; out-of-range enum bytes are rejected (no conjuring a fake "P3" owner from a corrupt
 `STATE`), and a malformed datagram is still mined for its piggybacked acks and liveness timestamp before
 being dropped, the receive loop cannot be crashed by a short packet.

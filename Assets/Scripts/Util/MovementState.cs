@@ -15,6 +15,7 @@ namespace JumpNowBro.Util
         public float coyoteTimer, jumpBufferTimer, dashTimer, invulnTimer;
         public sbyte freezeTicksRemaining;        // tick counter (not seconds): survives v1.5 variable-dt rollback
         public bool dashChargeAvailable, wasJumpHeld, isDead;
+        public bool dashTouchedGround;           // distinguishes a ledge dash from an entirely airborne dash
 
         // Wire layout — 46 bytes. 32 bytes of floats + 4 small fields + 10 reserved.
         //   0  posX                f32 BE
@@ -28,7 +29,7 @@ namespace JumpNowBro.Util
         //  32  state               u8
         //  33  facing              i8
         //  34  freezeTicksRemaining i8
-        //  35  flags               u8   bit 0=dashChargeAvailable, 1=wasJumpHeld, 2=isDead
+        //  35  flags               u8   bit 0=dashChargeAvailable, 1=wasJumpHeld, 2=isDead, 3=dashTouchedGround
         //  36  _padding            10 zero bytes — v1.6/v1.7 append-only reserve
         public const int PackedSize = 46;
         public const int MinPackedSize = 36;      // everything through flags; padding can be truncated
@@ -51,6 +52,7 @@ namespace JumpNowBro.Util
             if (s.dashChargeAvailable) flags |= 1 << 0;
             if (s.wasJumpHeld)         flags |= 1 << 1;
             if (s.isDead)              flags |= 1 << 2;
+            if (s.dashTouchedGround)   flags |= 1 << 3;
             dst[35] = flags;
             dst.Slice(36, 10).Clear();
             return PackedSize;
@@ -82,6 +84,7 @@ namespace JumpNowBro.Util
             s.dashChargeAvailable  = (flags & (1 << 0)) != 0;
             s.wasJumpHeld          = (flags & (1 << 1)) != 0;
             s.isDead               = (flags & (1 << 2)) != 0;
+            s.dashTouchedGround    = (flags & (1 << 3)) != 0;
             return true;
         }
 
