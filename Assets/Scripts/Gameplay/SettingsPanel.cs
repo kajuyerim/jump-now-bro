@@ -265,7 +265,7 @@ namespace JumpNowBro.Gameplay
         // rebinds mirror into the shared LAN layout inside InputRebinds. Shared gamepad cells sit below.
         void BuildControlsTab(Transform parent)
         {
-            Label(parent, "Click a binding, then press the new key/button. Esc cancels.", 13, FontStyles.Italic, 0.5f);
+            Label(parent, "Select a keyboard binding, then press a new key. Esc cancels.", 13, FontStyles.Italic, 0.5f);
 
             var header = Row(parent);
             RowLabel(header.transform, "");
@@ -280,7 +280,7 @@ namespace JumpNowBro.Gameplay
                 if (cell.Column < 0 && !padSection)
                 {
                     padSection = true;
-                    Label(parent, "Gamepad (both players)", 14, FontStyles.Italic, 0.6f);
+                    Label(parent, "Gamepad (both players) — Start/Menu cancels rebinding.", 14, FontStyles.Italic, 0.6f);
                 }
                 if (!rows.TryGetValue(cell.Label, out var row))
                 {
