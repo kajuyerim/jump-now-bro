@@ -13,7 +13,7 @@ namespace JumpNowBro.Networking
     /// direction identifies the sender, so the local echo renders immediately and no sender byte exists.
     ///
     /// Self-spawns like SwapScheduleDriver; persists across levels; all state is transient (ResetAll).
-    public sealed class CommsController : MonoBehaviour
+    public sealed class CommsController : GatedSimulationBehaviour
     {
         public static CommsController Instance { get; private set; }
 
@@ -118,14 +118,11 @@ namespace JumpNowBro.Networking
             if (mouse != null && mouse.leftButton.wasPressedThisFrame) TrySendPing(mouse.position.ReadValue());
         }
 
-        // The beat driver. Gated like SwapScheduleDriver's due-loop (null-tolerant, deliberately NOT
-        // SimPaused — the loss surface clears comms via ResetAll instead), so a countdown never beats
-        // through a level load or behind the summary card; IsStale mops up one that sat under a hold.
-        void FixedUpdate()
+        protected override SimulationGate Gate => SimulationGate.Timeline;
+
+        protected override void SimulationTick()
         {
             if (!countdownActive) return;
-            var lm = LevelManager.Instance;
-            if (lm != null && (lm.IsLoading || lm.SummaryHold)) return;
             uint clock = Clock;
             if (CountdownBeats.IsStale(countdownGoTick, clock)) { countdownActive = false; return; }
             int b = CountdownBeats.CurrentBeat(countdownGoTick, clock);
@@ -168,7 +165,7 @@ namespace JumpNowBro.Networking
             {
                 var lm = LevelManager.Instance;
                 return lm != null && lm.CurrentLevelIndex >= 0 && lm.CurrentLevelIndex < lm.LevelCount
-                       && !lm.IsLoading && !victoryLatch;
+                       && !lm.SceneEventsGated && !victoryLatch;
             }
         }
 

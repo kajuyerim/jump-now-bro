@@ -18,7 +18,7 @@ namespace JumpNowBro.Gameplay
     /// Canvas sorting 90: above the HUD overlay (50), deliberately BELOW the menu canvas (100) that hosts
     /// the connection-lost overlay and Leave bar — a mid-hold disconnect must cover and raycast-block
     /// this card, with the hold surviving underneath for a rejoin-resume.
-    public sealed class RunSummaryController : MonoBehaviour
+    public sealed class RunSummaryController : GatedSimulationBehaviour
     {
         public static RunSummaryController Instance { get; private set; }
 
@@ -118,12 +118,12 @@ namespace JumpNowBro.Gameplay
             tracker.NotifySwapApplied();
         }
 
-        void FixedUpdate()
+        protected override SimulationGate Gate => SimulationGate.Gameplay;
+
+        protected override void SimulationTick()
         {
-            // Exactly the sim-gate predicate: the timer freezes during loads, the LEVEL_READY barrier,
-            // the connection-loss pause, and the summary hold itself.
             var lm = LevelManager.Instance;
-            if (Authority.IsHost && tracker.Running && lm != null && !lm.SimGated)
+            if (Authority.IsHost && tracker.Running && lm != null)
                 tracker.Tick(Time.fixedDeltaTime);
         }
 

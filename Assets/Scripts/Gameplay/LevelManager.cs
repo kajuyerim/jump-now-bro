@@ -48,9 +48,26 @@ namespace JumpNowBro.Gameplay
         /// silently release the hold; conversely a mid-hold connection loss must STACK its pause over this.
         public bool SummaryHold { get; set; }
 
-        /// The one sim-gate predicate: PlayerController, ClientPredictor, and NetworkStateBroadcaster all
-        /// freeze on this (and the run timer accumulates only while it is false).
+        /// Gameplay motion, input sampling, STATE broadcast and the run timer freeze for all three holds.
         public bool SimGated => IsLoading || SimPaused || SummaryHold;
+
+        /// Swap/countdown timelines stop for scene loads and summaries, but continue through SimPaused.
+        public bool TimelineGated => IsLoading || SummaryHold;
+
+        /// Received comms may render during pauses and summaries, but not into a scene being replaced.
+        /// Their consumer also checks its active-level range and victory latch.
+        public bool SceneEventsGated => IsLoading;
+
+        public bool IsGated(SimulationGate gate)
+        {
+            switch (gate)
+            {
+                case SimulationGate.Gameplay: return SimGated;
+                case SimulationGate.Timeline: return TimelineGated;
+                case SimulationGate.SceneLoading: return SceneEventsGated;
+                default: throw new ArgumentOutOfRangeException(nameof(gate));
+            }
+        }
 
         public int LevelCount => levelSceneNames != null ? levelSceneNames.Length : 0;
 

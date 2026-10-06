@@ -6,7 +6,7 @@ namespace JumpNowBro.Gameplay
 {
     [RequireComponent(typeof(Rigidbody2D))]
     [RequireComponent(typeof(PlayerCollisionConfig))]
-    public class PlayerController : MonoBehaviour
+    public class PlayerController : GatedSimulationBehaviour
     {
         [SerializeField] PlayerTuning tuning;
         [SerializeField] float fallLimitY = -20f;
@@ -97,13 +97,10 @@ namespace JumpNowBro.Gameplay
             collisionWorld = collisionConfig.CreateWorld(rb);
         }
 
-        void FixedUpdate()
+        protected override SimulationGate Gate => SimulationGate.Gameplay;
+
+        protected override void SimulationTick()
         {
-            // Freeze the sim across a level transition (IsLoading: the body would free-fall once the old scene's
-            // ground unloads and rack up phantom fall deaths), the host's LEVEL_READY barrier (SimPaused), and
-            // the end-of-level summary hold (SummaryHold, #130). Mirrors the same SimGated gate in
-            // ClientPredictor / NetworkStateBroadcaster.
-            if (LevelManager.Instance != null && LevelManager.Instance.SimGated) return;
             if (p1 == null || p2 == null || tuning == null) return;
             if (isDead)
             {

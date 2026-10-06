@@ -17,7 +17,7 @@ namespace JumpNowBro.Networking
     ///
     /// Execution order −40: after ClientInputSender (−50) so LastSampledFrame is fresh, after TickClock (−100).
     [DefaultExecutionOrder(-40)]
-    public sealed class ClientPredictor : MonoBehaviour
+    public sealed class ClientPredictor : GatedSimulationBehaviour
     {
         ClientInputSender sender;
         ClientStateRenderer stateRenderer;
@@ -62,10 +62,11 @@ namespace JumpNowBro.Networking
                 : _ => this.mapStore != null ? this.mapStore.Current : ControlMap.Default;
         }
 
-        void FixedUpdate()
+        protected override SimulationGate Gate => SimulationGate.Gameplay;
+
+        protected override void SimulationTick()
         {
             if (sender == null || stateRenderer == null || tickClock == null || rb == null || world == null || tuning == null) return;
-            if (LevelManager.Instance != null && LevelManager.Instance.SimGated) return;
             if (!stateRenderer.HasState) return;                       // nothing authoritative to predict from yet
 
             var authoritative = stateRenderer.CurrentState;

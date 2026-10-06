@@ -16,7 +16,7 @@ namespace JumpNowBro.Networking
     /// Wiring to a transport / INPUT packet decode lands in the role-aware spawner (#78); v1.4 #74
     /// exposes `EnqueueFromInputBody` as the integration seam so tests and #78 can both feed frames.
     [DefaultExecutionOrder(-50)]
-    public sealed class NetworkRemoteInputSource : MonoBehaviour, IInputSource
+    public sealed class NetworkRemoteInputSource : GatedSimulationBehaviour, IInputSource
     {
         readonly NetworkInputRing ring = new NetworkInputRing();
         PlayerInputFrame current;
@@ -49,7 +49,9 @@ namespace JumpNowBro.Networking
             ring.Enqueue(clientTick, accepted);
         }
 
-        void FixedUpdate()
+        protected override SimulationGate Gate => SimulationGate.Gameplay;
+
+        protected override void SimulationTick()
         {
             if (ring.TryConsumeNewest(out var picked, out _))
             {

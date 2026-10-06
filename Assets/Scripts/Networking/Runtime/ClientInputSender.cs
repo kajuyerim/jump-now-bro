@@ -15,7 +15,7 @@ namespace JumpNowBro.Networking
     ///
     /// Wiring to a live transport + IInputSource is the #78 spawner's job; Bind() is the seam.
     [DefaultExecutionOrder(-50)]
-    public sealed class ClientInputSender : MonoBehaviour
+    public sealed class ClientInputSender : GatedSimulationBehaviour
     {
         readonly InputSendRing ring = new InputSendRing();
         readonly byte[] sendBuffer = new byte[InputBody.HeaderSize + InputSendRing.K];
@@ -39,9 +39,10 @@ namespace JumpNowBro.Networking
 
         bool transportAlive = true;
 
-        void FixedUpdate()
+        protected override SimulationGate Gate => SimulationGate.Gameplay;
+
+        protected override void SimulationTick()
         {
-            if (LevelManager.Instance != null && LevelManager.Instance.SimGated) return;
             if (!transportAlive || source == null || transport == null || tickClock == null) return;
 
             uint tick = tickClock.Current;
