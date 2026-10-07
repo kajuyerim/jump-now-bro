@@ -33,10 +33,10 @@ namespace JumpNowBro.Networking
         // broadcast=true (discovery socket): permit sending to 255.255.255.255, and SO_REUSEADDR so a host
         // and client on the SAME machine can both bind the discovery port. The gameplay socket leaves both
         // OFF — SO_REUSEADDR there would let a second host bind the gameplay port and steal packets.
-        public UdpSocket(int bindPort, bool broadcast = false, int maxQueuedDatagrams = 0)
+        public UdpSocket(int bindPort, bool broadcast = false, int maxQueuedDatagrams = NetworkTuning.GameplayQueueCapacity)
         {
             if (maxQueuedDatagrams < 0) throw new ArgumentOutOfRangeException(nameof(maxQueuedDatagrams));
-            this.maxQueuedDatagrams = maxQueuedDatagrams; // zero preserves the gameplay socket's uncapped queue
+            this.maxQueuedDatagrams = maxQueuedDatagrams; // zero explicitly opts out of the default bound
             client = new UdpClient();
             try
             {

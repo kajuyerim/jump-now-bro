@@ -113,6 +113,13 @@ discovery or the host's raw HELLO pre-seeding. Online/Steam support needs a sepa
 and native message transport; its reliability replaces the custom UDP ack/retry layer. The app message
 formats, session handlers and prediction code remain the reusable layer.
 
+Standalone players run in the background so losing window focus does not suspend session pumping.
+Gameplay UDP sockets admit at most 256 queued datagrams (over four seconds of 60 Hz INPUT traffic).
+During a main-thread drain gap, new arrivals are dropped once that bound is reached; queued packets
+keep FIFO order. Reliable messages retransmit, and newer INPUT/STATE resumes after draining. Discovery
+uses its own smaller bound. This bounds the retained backlog rather than growing it for the whole pause;
+a main-thread stall longer than the silence timeout can still disconnect, independently of window focus.
+
 Reliability keys on a **stable per-message sequence number**, not the packet-seq the header carries, this
 is what lets a reliable `EVENT` survive loss and out-of-order arrival without head-of-line-blocking the
 unreliable `INPUT`/`STATE` traffic sharing the same socket.

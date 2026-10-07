@@ -41,13 +41,15 @@ namespace JumpNowBro.Tests
             Assert.IsFalse(s.Poll(out _, out _));
         }
 
-        [Test]
-        public void BoundedReceiveQueue_DropsOverflowAndAcceptsAfterDrain()
+        [TestCase(8)]
+        [TestCase(NetworkTuning.GameplayQueueCapacity)]
+        public void BoundedReceiveQueue_DropsOverflowAndAcceptsAfterDrain(int capacity)
         {
-            using var receiver = new UdpSocket(0, maxQueuedDatagrams: 8);
+            using var receiver = capacity == NetworkTuning.GameplayQueueCapacity
+                ? new UdpSocket(0) : new UdpSocket(0, maxQueuedDatagrams: capacity);
             using var sender = new UdpSocket(0);
             var endpoint = new IPEndPoint(IPAddress.Loopback, receiver.LocalPort);
-            for (int i = 0; i < 8; i++)
+            for (int i = 0; i < capacity; i++)
             {
                 sender.Send(new byte[] { 1 }, endpoint);
                 Assert.IsTrue(SpinWait.SpinUntil(() => receiver.QueuedDatagramCount == i + 1, 2000));
@@ -57,14 +59,14 @@ namespace JumpNowBro.Tests
                 sender.Send(new byte[] { 1 }, endpoint);
                 Assert.IsTrue(SpinWait.SpinUntil(() => receiver.DroppedDatagramCount == i + 1, 2000));
             }
-            Assert.AreEqual(8, receiver.QueuedDatagramCount);
+            Assert.AreEqual(capacity, receiver.QueuedDatagramCount);
             int drained = 0;
             while (receiver.Poll(out var data, out _))
             {
                 Assert.AreEqual(new byte[] { 1 }, data);
                 drained++;
             }
-            Assert.AreEqual(8, drained);
+            Assert.AreEqual(capacity, drained);
 
             sender.Send(new byte[] { 2 }, endpoint);
             Assert.IsTrue(SpinWait.SpinUntil(() => receiver.QueuedDatagramCount == 1, 2000));
