@@ -202,5 +202,5 @@ rights already granted for earlier versions, whose licence remains in Git histor
 
 Bundled third-party material retains its own terms; see
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Player builds include the notices
-and font licences under `StreamingAssets/Legal`. The audio provenance/replacement
-items listed in the notices remain unresolved before release.
+and font licences under `StreamingAssets/Legal`. Gameplay sound effects are synthesized
+from the included source recipe; music and communication clips remain silent placeholders.
