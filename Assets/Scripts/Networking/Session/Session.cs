@@ -20,10 +20,6 @@ namespace JumpNowBro.Networking
         // that never lands; it is long enough for a human to start the host after pressing Join.
         const double ConnectBudgetSeconds = 15.0;
         const double HelloProbeInterval = 0.5;      // client re-sends HELLO this often while Connecting
-        // Re-probes reuse the seq the queued HELLO claimed (the reliable send-seq space starts at 1, so the
-        // first queued message is 1). Holding it constant lets the host dedupe repeats; it also keeps the
-        // client's GOODBYE/EVENT continuing from seq 2, which the host's in-order receive buffer requires.
-        const ushort HelloSeq = 1;
         const int MaxBody = 128;                    // Welcome/Hello bodies now carry a display name; sized for the 16-char cap + headroom
 
         readonly IReliableTransport transport;
@@ -72,7 +68,7 @@ namespace JumpNowBro.Networking
             connectingSince = clock;
             lastHelloAt = clock;
             SetState(SessionState.Connecting);
-            if (!isHost) SendHello(queued: true);     // client speaks first; the queued HELLO claims message-seq 1
+            if (!isHost) SendHello();                // client speaks first
         }
 
         public void Tick(float dt)
@@ -85,7 +81,7 @@ namespace JumpNowBro.Networking
             if (State == SessionState.Connecting)
             {
                 // Client keeps re-probing until WELCOME lands or the budget runs out (host may start late).
-                if (!isHost && clock - lastHelloAt >= HelloProbeInterval) { SendHello(queued: false); lastHelloAt = clock; }
+                if (!isHost && clock - lastHelloAt >= HelloProbeInterval) { SendHello(); lastHelloAt = clock; }
                 if (clock - connectingSince > ConnectBudgetSeconds)
                     Disconnect(DisconnectReason.HandshakeFailed);
             }
@@ -133,11 +129,7 @@ namespace JumpNowBro.Networking
             }
         }
 
-        // queued: the opening HELLO rides the send queue once, claiming message-seq 1 so the queue's next
-        // reliable message (GOODBYE/EVENT) is seq 2 and the host delivers it in order. The steady re-probe
-        // (queued: false) bypasses the queue under that same fixed seq, so the host dedupes the repeats and
-        // nothing piles up; it is what keeps a late-starting host catching a HELLO within a probe interval.
-        void SendHello(bool queued)
+        void SendHello()
         {
             var hello = new Hello
             {
@@ -145,8 +137,7 @@ namespace JumpNowBro.Networking
                 ColorIndex = LocalColor(), Name = LocalName(),
             };
             int n = hello.Write(scratch);
-            if (queued) transport.Send(Channel.Reliable, MessageType.Hello, scratch.AsSpan(0, n));
-            else        transport.SendReliableFixedSeq(MessageType.Hello, HelloSeq, scratch.AsSpan(0, n));
+            transport.SendHelloProbe(scratch.AsSpan(0, n));
         }
 
         void SendWelcome(bool accepted, WelcomeReason reason)

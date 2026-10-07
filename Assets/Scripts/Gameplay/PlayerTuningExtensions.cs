@@ -25,7 +25,7 @@ namespace JumpNowBro.Gameplay
                 dashDistance                = t.dashDistance,
                 dashDuration                = t.dashDuration,
                 dashInvulnerabilityDuration = t.dashInvulnerabilityDuration,
-                dashFreezeTicks             = (sbyte)Math.Ceiling(t.dashFreezeFrameDuration / dt),
+                dashFreezeTicks             = (sbyte)Math.Clamp(Math.Ceiling(t.dashFreezeFrameDuration / dt), 0, sbyte.MaxValue),
                 fallLimitY                  = fallLimitY,
             };
         }

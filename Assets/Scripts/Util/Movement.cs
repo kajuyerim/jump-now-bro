@@ -7,15 +7,11 @@ namespace JumpNowBro.Util
     /// can stand on. State machine + jump/cut/coyote/buffer + dash/freeze + gravity integration are
     /// all here; axis-separated Y-then-X sweep is delegated to ICollisionWorld.
     ///
-    /// `sweep = false` skips the SweepX/Y calls and leaves velocity un-zeroed on block. Used at #69
-    /// where the Dynamic body's Box2D solver still handles collision and we'd otherwise diverge from
-    /// v0.4-mvp on first-contact ticks (vel zeroed → Box2D moves nothing → player ends tick up to
-    /// runSpeed·dt short of the wall, busts the #72 A/B tolerance). At #70 onwards, sweep = true.
     public static class Movement
     {
         public static (MovementState, EdgeFlags) Step(
             in MovementState s_in, in EffectiveInput input, in MovementTuning t,
-            float dt, ICollisionWorld world, bool sweep = true)
+            float dt, ICollisionWorld world)
         {
             var s = s_in;
             EdgeFlags edges = EdgeFlags.None;
@@ -40,7 +36,7 @@ namespace JumpNowBro.Util
             switch (s.state)
             {
                 case MoveState.Grounded:
-                    if (input.dashPressed && s.dashChargeAvailable) FireDash(ref s, t, ref edges);
+                    if (input.dashPressed && s.dashChargeAvailable) FireDash(ref s, t, grounded, ref edges);
                     else if (jumpAllowed) FireJump(ref s, t, ref edges);
                     else if (!grounded)
                     {
@@ -50,7 +46,7 @@ namespace JumpNowBro.Util
                     break;
 
                 case MoveState.Jumping:
-                    if (input.dashPressed && s.dashChargeAvailable) FireDash(ref s, t, ref edges);
+                    if (input.dashPressed && s.dashChargeAvailable) FireDash(ref s, t, grounded, ref edges);
                     else
                     {
                         if (s.velY > 0f && !input.jumpHeld && s.wasJumpHeld)
@@ -69,11 +65,12 @@ namespace JumpNowBro.Util
                         s.dashChargeAvailable = true;                                    // refund dash charge on land (line 147)
                         edges |= EdgeFlags.LandedThisTick;
                     }
-                    if (input.dashPressed && s.dashChargeAvailable) FireDash(ref s, t, ref edges);
+                    if (input.dashPressed && s.dashChargeAvailable) FireDash(ref s, t, grounded, ref edges);
                     else if (jumpAllowed) FireJump(ref s, t, ref edges);
                     break;
 
                 case MoveState.Dashing:
+                    s.dashTouchedGround |= grounded;
                     if (s.freezeTicksRemaining > 0)
                     {
                         s.velX = 0f; s.velY = 0f;
@@ -87,7 +84,12 @@ namespace JumpNowBro.Util
                     else
                     {
                         s.dashTimer = MathF.Max(0f, s.dashTimer - dt);
-                        if (s.dashTimer <= 0f) s.state = MoveState.Falling;
+                        if (s.dashTimer <= 0f)
+                        {
+                            s.state = MoveState.Falling;
+                            if (s.dashTouchedGround && !grounded) s.coyoteTimer = t.coyoteTime;
+                            s.dashTouchedGround = false;
+                        }
                     }
                     break;
             }
@@ -99,25 +101,22 @@ namespace JumpNowBro.Util
                 s.velY -= t.gravity * dt;
             }
 
-            if (sweep)
-            {
-                world.SweepY(s.posX, s.posY, s.velY * dt, out float resolvedDy, out bool blockedY);
-                if (blockedY) s.velY = 0f;
-                s.posY += resolvedDy;
+            world.SweepY(s.posX, s.posY, s.velY * dt, out float resolvedDy, out bool blockedY);
+            if (blockedY) s.velY = 0f;
+            s.posY += resolvedDy;
 
-                float wantDx = s.velX * dt;
-                world.SweepX(s.posX, s.posY, wantDx, out float resolvedDx, out bool blockedX);
-                if (blockedX) s.velX = 0f;
-                s.posX += resolvedDx;
+            float wantDx = s.velX * dt;
+            world.SweepX(s.posX, s.posY, wantDx, out float resolvedDx, out bool blockedX);
+            if (blockedX) s.velX = 0f;
+            s.posX += resolvedDx;
 
-                // #102 corner correction. Airborne, pushing horizontally, and both axes blocked: that's
-                // either a corner-on-corner wedge or flush against a full wall. A small upward lift that
-                // frees the horizontal move distinguishes them — only a corner clears, so we lift over it
-                // instead of sticking. A full-height wall never frees (no-op), and flat ground never blocks
-                // X, so WallStop_RunningRight and the v1.3 golden master are unchanged.
-                if (blockedX && blockedY && !grounded && input.moveDir != 0)
-                    CornerCorrect(ref s, wantDx, world);
-            }
+            // #102 corner correction. Airborne, pushing horizontally, and both axes blocked: that's
+            // either a corner-on-corner wedge or flush against a full wall. A small upward lift that
+            // frees the horizontal move distinguishes them — only a corner clears, so we lift over it
+            // instead of sticking. A full-height wall never frees (no-op), and flat ground never blocks
+            // X, so WallStop_RunningRight and the v1.3 golden master are unchanged.
+            if (blockedX && blockedY && !grounded && input.moveDir != 0)
+                CornerCorrect(ref s, wantDx, world);
 
             s.wasJumpHeld = input.jumpHeld;
             return (s, edges);
@@ -132,9 +131,10 @@ namespace JumpNowBro.Util
             edges |= EdgeFlags.JumpedThisTick;
         }
 
-        static void FireDash(ref MovementState s, in MovementTuning t, ref EdgeFlags edges)
+        static void FireDash(ref MovementState s, in MovementTuning t, bool grounded, ref EdgeFlags edges)
         {
             s.state = MoveState.Dashing;
+            s.dashTouchedGround = grounded;
             s.freezeTicksRemaining = t.dashFreezeTicks;
             s.dashTimer = t.dashDuration;
             s.invulnTimer = t.dashInvulnerabilityDuration;

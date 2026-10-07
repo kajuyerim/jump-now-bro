@@ -153,7 +153,7 @@ namespace JumpNowBro.Gameplay
                 .WithControlsExcluding("<Gamepad>/start")     // Start toggles the settings panel globally; binding
                 .WithControlsExcluding("<Gamepad>/select")    // jump to it would open settings on every jump
                 .WithControlsHavingToMatchPath(cell.Gamepad ? "<Gamepad>" : "<Keyboard>")
-                .WithCancelingThrough("<Keyboard>/escape")
+                .WithCancelingThrough(cell.Gamepad ? "<Gamepad>/start" : "<Keyboard>/escape")
                 .OnMatchWaitForAnother(0.05f)
                 .OnComplete(o =>
                 {

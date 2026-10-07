@@ -33,29 +33,34 @@ namespace JumpNowBro.Networking
         // broadcast=true (discovery socket): permit sending to 255.255.255.255, and SO_REUSEADDR so a host
         // and client on the SAME machine can both bind the discovery port. The gameplay socket leaves both
         // OFF — SO_REUSEADDR there would let a second host bind the gameplay port and steal packets.
-        public UdpSocket(int bindPort, bool broadcast = false, int maxQueuedDatagrams = 0)
+        public UdpSocket(int bindPort, bool broadcast = false, int maxQueuedDatagrams = NetworkTuning.GameplayQueueCapacity)
         {
             if (maxQueuedDatagrams < 0) throw new ArgumentOutOfRangeException(nameof(maxQueuedDatagrams));
-            this.maxQueuedDatagrams = maxQueuedDatagrams; // zero preserves the gameplay socket's uncapped queue
-            if (broadcast)
+            this.maxQueuedDatagrams = maxQueuedDatagrams; // zero explicitly opts out of the default bound
+            client = new UdpClient();
+            try
             {
-                client = new UdpClient();
-                client.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+                if (broadcast)
+                {
+                    client.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+                    client.EnableBroadcast = true;
+                }
                 client.Client.Bind(new IPEndPoint(IPAddress.Any, bindPort));
-                client.EnableBroadcast = true;
-            }
-            else
-            {
-                client = new UdpClient(new IPEndPoint(IPAddress.Any, bindPort));
-            }
-            // Closing a socket from another thread does not reliably interrupt Receive on every platform.
-            // The timeout gives the loop a portable chance to observe running=false during shutdown.
-            client.Client.ReceiveTimeout = 250;
-            LocalPort = ((IPEndPoint)client.Client.LocalEndPoint).Port;
+                // Closing a socket from another thread does not reliably interrupt Receive on every platform.
+                // The timeout gives the loop a portable chance to observe running=false during shutdown.
+                client.Client.ReceiveTimeout = 250;
+                LocalPort = ((IPEndPoint)client.Client.LocalEndPoint).Port;
 
-            running = true;
-            receiveThread = new Thread(ReceiveLoop) { IsBackground = true, Name = $"UdpSocket:{LocalPort}" };
-            receiveThread.Start();
+                running = true;
+                receiveThread = new Thread(ReceiveLoop) { IsBackground = true, Name = $"UdpSocket:{LocalPort}" };
+                receiveThread.Start();
+            }
+            catch
+            {
+                running = false;
+                client.Dispose();
+                throw;
+            }
         }
 
         public void Send(ReadOnlySpan<byte> data, IPEndPoint to)

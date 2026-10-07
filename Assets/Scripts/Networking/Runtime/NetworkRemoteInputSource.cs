@@ -1,4 +1,5 @@
 using UnityEngine;
+using JumpNowBro.Gameplay;
 using JumpNowBro.Util;
 
 namespace JumpNowBro.Networking
@@ -15,10 +16,13 @@ namespace JumpNowBro.Networking
     /// Wiring to a transport / INPUT packet decode lands in the role-aware spawner (#78); v1.4 #74
     /// exposes `EnqueueFromInputBody` as the integration seam so tests and #78 can both feed frames.
     [DefaultExecutionOrder(-50)]
-    public sealed class NetworkRemoteInputSource : MonoBehaviour, IInputSource
+    public sealed class NetworkRemoteInputSource : GatedSimulationBehaviour, IInputSource
     {
         readonly NetworkInputRing ring = new NetworkInputRing();
         PlayerInputFrame current;
+        PlayerController player;
+
+        void Awake() => player = GetComponent<PlayerController>();
 
         public uint LastConsumedClientTick => ring.LastConsumedClientTick;
 
@@ -33,13 +37,21 @@ namespace JumpNowBro.Networking
         public void EnqueueFromInputBody(uint baseTick, System.ReadOnlySpan<byte> packedFrames)
         {
             for (int i = 0; i < packedFrames.Length; i++)
-                ring.Enqueue(baseTick + (uint)i, PlayerInputFrame.Unpack(packedFrames[i]));
+                EnqueueFrame(baseTick + (uint)i, PlayerInputFrame.Unpack(packedFrames[i]));
         }
 
         /// Direct enqueue for tests and (when needed) fine-grained replay paths.
-        public void EnqueueFrame(uint clientTick, in PlayerInputFrame frame) => ring.Enqueue(clientTick, frame);
+        public void EnqueueFrame(uint clientTick, in PlayerInputFrame frame)
+        {
+            var accepted = frame;
+            // Respawn can run after packet delivery but before the next FixedUpdate; filter on arrival too.
+            if (player != null && player.IsDead) accepted.jumpPressed = accepted.dashPressed = false;
+            ring.Enqueue(clientTick, accepted);
+        }
 
-        void FixedUpdate()
+        protected override SimulationGate Gate => SimulationGate.Gameplay;
+
+        protected override void SimulationTick()
         {
             if (ring.TryConsumeNewest(out var picked, out _))
             {
@@ -52,6 +64,7 @@ namespace JumpNowBro.Networking
                 current.jumpPressed = false;
                 current.dashPressed = false;
             }
+            if (player != null && player.IsDead) Tick();
         }
 
         public void Tick()

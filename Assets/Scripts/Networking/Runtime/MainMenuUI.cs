@@ -27,6 +27,9 @@ namespace JumpNowBro.Networking
         DiscoveryService browse;                                           // passive LAN listener while the menu is up
         GameObject hostList;
         float nextHostRefresh;
+        const float BrowseRetrySeconds = 5f;
+        float nextBrowseAttempt;
+        bool browseFailureLogged;
         readonly HashSet<string> shownHosts = new HashSet<string>();
 
         void Awake()
@@ -107,8 +110,21 @@ namespace JumpNowBro.Networking
 
             if (idle)                                                            // browse the LAN for hosts while the menu is shown
             {
-                if (browse == null)
-                    try { browse = DiscoveryService.StartClient(net.DiscoveryPort); } catch { browse = null; }
+                if (browse == null && Time.unscaledTime >= nextBrowseAttempt)
+                {
+                    nextBrowseAttempt = Time.unscaledTime + BrowseRetrySeconds;
+                    try
+                    {
+                        browse = DiscoveryService.StartClient(net.DiscoveryPort);
+                        browseFailureLogged = false;
+                    }
+                    catch (System.Exception e)
+                    {
+                        if (!browseFailureLogged)
+                            Debug.LogWarning($"LAN discovery could not listen on port {net.DiscoveryPort}: {e.Message} Retrying every {BrowseRetrySeconds} seconds.");
+                        browseFailureLogged = true;
+                    }
+                }
                 browse?.Tick(Time.timeAsDouble);
                 if (Time.time >= nextHostRefresh) { nextHostRefresh = Time.time + 0.5f; RefreshHosts(); }
             }
@@ -345,6 +361,8 @@ namespace JumpNowBro.Networking
         {
             browse?.Dispose();
             browse = null;
+            nextBrowseAttempt = 0f;
+            browseFailureLogged = false;
             shownHosts.Clear();
             if (hostList != null) foreach (Transform child in hostList.transform) Destroy(child.gameObject);
         }

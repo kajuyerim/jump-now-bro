@@ -11,8 +11,9 @@ CI-testable and locked by a 300-tick golden master (see [Architecture](architect
 
 The shared-control mechanic is implemented as pure data: a host-owned `ControlMap` routes two raw input
 frames into one `EffectiveInput`, and `SwapTrigger` volumes flip ownership mid-level. Keeping the map
-host-authoritative (the client's copy is HUD-only) means the simulation never reads a value that could be
-stale across the wire. The trigger fires a **static** cross-assembly event, so `Gameplay` never has to
+host-authoritative means only the host commits ownership changes. The client uses its synchronized copy
+for both prediction and the HUD, then reconciles against authoritative state. The trigger fires a
+**static** cross-assembly event, so `Gameplay` never has to
 reference the `Networking` assembly, preserving the clean Phase 1 / Phase 2 boundary.
 
 ```mermaid
@@ -37,6 +38,10 @@ with **variable height** (release-to-halve while rising), **coyote time** and **
 0.1 s) to forgive the input side, and a freeze-then-burst **dash** with one charge refunded on landing.
 Wall jump/climb and 8-way dash are explicitly out of scope to keep the state machine small and the netcode
 surface honest, the dash is horizontal-only for the MVP.
+
+A dash that touches ground and finishes airborne grants the same 0.1-second coyote window as a walk-off.
+A dash spent entirely in the air grants no extra jump. Ground contact is stored in the movement snapshot
+so client reconciliation preserves this distinction; the dash charge stays spent until landing.
 
 ```mermaid
 stateDiagram-v2

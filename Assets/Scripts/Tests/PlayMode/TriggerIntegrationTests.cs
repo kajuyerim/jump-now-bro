@@ -65,6 +65,91 @@ namespace JumpNowBro.Tests.PlayMode
             playerGo.GetComponent<Rigidbody2D>().useFullKinematicContacts = true;
         }
 
+        [Test]
+        public void GhostIntent_IgnoresDestroyedInterfaceSource()
+        {
+            var go = new GameObject("DestroyedIntentSourceTest");
+            var source = go.AddComponent<NetworkRemoteInputSource>();
+            try
+            {
+                SetField(source, "current", new PlayerInputFrame { moveRight = true, jumpHeld = true });
+                IInputSource input = source;
+                Assert.IsTrue(GhostIntentSources.From(input).right);
+                Object.DestroyImmediate(source);
+                Assert.IsFalse(GhostIntentSources.From(input).right);
+                Assert.IsFalse(GhostIntentSources.From(input).jumpHeld);
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        [Test]
+        public void Tuning_ClampsFreezeTicksWithoutWrapping()
+        {
+            var tuning = ScriptableObject.CreateInstance<PlayerTuning>();
+            try
+            {
+                tuning.dashFreezeFrameDuration = 0.05f;
+                Assert.AreEqual(3, tuning.AsMovementTuning(0.02f, -20).dashFreezeTicks);
+                tuning.dashFreezeFrameDuration = 10f;
+                Assert.AreEqual(sbyte.MaxValue, tuning.AsMovementTuning(0.02f, -20).dashFreezeTicks);
+                tuning.dashFreezeFrameDuration = -1f;
+                Assert.AreEqual(0, tuning.AsMovementTuning(0.02f, -20).dashFreezeTicks);
+            }
+            finally { Object.DestroyImmediate(tuning); }
+        }
+
+        [UnityTest]
+        public IEnumerator RemoteInput_DiscardsDeathFreezeEdges_AndAcceptsFirstLivePress()
+        {
+            yield return LoadLevelAndGrabPlayer("Level_01");
+            player.enabled = false;
+            var remote = playerGo.AddComponent<NetworkRemoteInputSource>();
+            remote.enabled = false;
+            player.Inject(remote, remote);
+            int dashes = 0;
+            player.OnDash += () => dashes++;
+            uint tick = 0;
+            var press = new PlayerInputFrame { moveRight = true, jumpPressed = true, dashPressed = true };
+            foreach (bool early in new[] { true, false })
+            foreach (bool livePress in new[] { false, true })
+            {
+                SetField(player, "isDead", true);
+                if (early) remote.EnqueueFromInputBody(++tick, new[] { PlayerInputFrame.Pack(press) });
+                StepInputAndPlayer(remote);
+                StepInputAndPlayer(remote);
+                // The late packet arrives after the last frozen FixedUpdate, just before respawn.
+                if (!early) remote.EnqueueFromInputBody(++tick, new[] { PlayerInputFrame.Pack(press) });
+                SetField(player, "currentState", typeof(PlayerController)
+                    .GetMethod("FreshSpawnState", BindingFlags.NonPublic | BindingFlags.Static).Invoke(null, null));
+                SetField(player, "isDead", false);
+                int before = dashes;
+                if (livePress) remote.EnqueueFromInputBody(++tick, new[] { PlayerInputFrame.Pack(press) });
+                StepInputAndPlayer(remote);
+                Assert.AreEqual(livePress, player.LastHostInputFrame.jumpPressed, $"early={early}, livePress={livePress}");
+                Assert.AreEqual(livePress, player.LastHostInputFrame.dashPressed);
+                Assert.AreEqual(before + (livePress ? 1 : 0), dashes);
+                Assert.IsTrue(player.LastHostInputFrame.moveRight, "held input should survive the freeze");
+                Assert.AreEqual(tick, remote.LastConsumedClientTick);
+                if (!livePress)
+                {
+                    remote.EnqueueFromInputBody(++tick, new[] { PlayerInputFrame.Pack(press) });
+                    StepInputAndPlayer(remote);
+                    Assert.IsTrue(player.LastHostInputFrame.jumpPressed);
+                    Assert.IsTrue(player.LastHostInputFrame.dashPressed);
+                    Assert.AreEqual(before + 1, dashes);
+                }
+                StepInputAndPlayer(remote);
+                Assert.IsFalse(player.LastHostInputFrame.jumpPressed);
+                Assert.IsFalse(player.LastHostInputFrame.dashPressed);
+            }
+        }
+
+        void StepInputAndPlayer(NetworkRemoteInputSource remote)
+        {
+            typeof(NetworkRemoteInputSource).GetMethod("FixedUpdate", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(remote, null);
+            typeof(PlayerController).GetMethod("FixedUpdate", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(player, null);
+        }
+
         IEnumerator DriveInto(Collider2D trigger, Vector2? destination = null)
         {
             var rb = playerGo.GetComponent<Rigidbody2D>();

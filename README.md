@@ -15,8 +15,8 @@ no Mirror, no Photon, no Unity multiplayer services. Every byte on the wire is c
 
 ## Highlights
 
-- **Host-authoritative listen-server** over raw UDP, one machine runs the only simulation; the other
-  forwards input and renders state.
+- **Host-authoritative listen-server** over raw UDP: the host runs the authoritative simulation, while
+  the client predicts its locally owned inputs and reconciles against host state.
 - **Reliability keyed on a per-*message* sequence number** (not the packet sequence), so a reliable
   control-swap survives loss and reordering *without* head-of-line-blocking the unreliable input/state
   stream on the same socket.
@@ -44,6 +44,9 @@ The character has a small fixed action set, **Move (left/right)**, **Jump**, **D
 instant. Invisible **swap triggers** reassign ownership mid-platforming, so the moment-to-moment skill
 check is *verbal coordination* as much as execution. At the start P1 owns everything; crossing a swap
 trigger hands an action to P2.
+
+The host's map is authoritative. The client applies synchronized copies to its predictor to route its
+locally owned inputs, and also uses them for the HUD.
 
 ```mermaid
 flowchart LR
@@ -140,7 +143,7 @@ The deep dives, with the full set of diagrams, live in [`docs/`](docs/):
 2. Unity Hub → **Add** → select the cloned repo.
 3. Open `Assets/Scenes/Bootstrap.unity` and press **Play**, it loads Level 1 additively and spawns the
    player. *Always start from `Bootstrap`*; the persistent managers live there.
-4. For a standalone build, use **File → Build Profiles** (macOS or Windows). The scene list (`Bootstrap`
+4. For a standalone build, use **File → Build Profiles** (macOS or Linux). The scene list (`Bootstrap`
    at index 0 + the three levels) is already configured.
 
 > Cloning with sprites intact needs **Git LFS installed before `git clone`** (binary assets are

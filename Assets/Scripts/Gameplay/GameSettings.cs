@@ -34,10 +34,10 @@ namespace JumpNowBro.Gameplay
         public static bool  VSync        => PlayerPrefs.GetInt(KVSync, 1) != 0;
 
         // ---- audio (live-applied through AudioManager's mixer API) ----
-        public static void SetMasterVolume(float v) { v = Mathf.Clamp01(v); PlayerPrefs.SetFloat(KMaster, v); AudioManager.Instance?.SetMasterVolume(v); }
-        public static void SetMusicVolume(float v)  { v = Mathf.Clamp01(v); PlayerPrefs.SetFloat(KMusic, v);  AudioManager.Instance?.SetMusicVolume(v); }
-        public static void SetSFXVolume(float v)    { v = Mathf.Clamp01(v); PlayerPrefs.SetFloat(KSFX, v);    AudioManager.Instance?.SetSFXVolume(v); }
-        public static void SetMuted(bool m)         { PlayerPrefs.SetInt(KMuted, m ? 1 : 0); AudioManager.Instance?.SetMuted(m); }
+        public static void SetMasterVolume(float v) { v = Mathf.Clamp01(v); PlayerPrefs.SetFloat(KMaster, v); if (AudioManager.Instance != null) AudioManager.Instance.SetMasterVolume(v); }
+        public static void SetMusicVolume(float v)  { v = Mathf.Clamp01(v); PlayerPrefs.SetFloat(KMusic, v);  if (AudioManager.Instance != null) AudioManager.Instance.SetMusicVolume(v); }
+        public static void SetSFXVolume(float v)    { v = Mathf.Clamp01(v); PlayerPrefs.SetFloat(KSFX, v);    if (AudioManager.Instance != null) AudioManager.Instance.SetSFXVolume(v); }
+        public static void SetMuted(bool m)         { PlayerPrefs.SetInt(KMuted, m ? 1 : 0); if (AudioManager.Instance != null) AudioManager.Instance.SetMuted(m); }
 
         /// Push stored audio levels into the AudioManager. Each key is optional so older or partially edited
         /// profiles keep the AudioManager's serialized default for values that were never saved.
@@ -68,8 +68,18 @@ namespace JumpNowBro.Gameplay
         }
 
         public static int QualityLevel => PlayerPrefs.GetInt(KQuality, QualitySettings.GetQualityLevel());
-        public static int ResWidth     => PlayerPrefs.GetInt(KResW, Screen.width);
-        public static int ResHeight    => PlayerPrefs.GetInt(KResH, Screen.height);
+        public static int ResWidth     => TryGetSavedResolution(out int w, out _) ? w : Screen.width;
+        public static int ResHeight    => TryGetSavedResolution(out _, out int h) ? h : Screen.height;
+
+        static bool TryGetSavedResolution(out int width, out int height)
+        {
+            width = PlayerPrefs.GetInt(KResW, 0);
+            height = PlayerPrefs.GetInt(KResH, 0);
+            if (width <= 0 || height <= 0) return false;
+            foreach (var resolution in Screen.resolutions)
+                if (resolution.width == width && resolution.height == height) return true;
+            return false;
+        }
 
         // ---- accessibility (#136) ----
 
@@ -111,8 +121,8 @@ namespace JumpNowBro.Gameplay
             if (PlayerPrefs.HasKey(KQuality))
                 QualitySettings.SetQualityLevel(Mathf.Clamp(QualityLevel, 0, Mathf.Max(0, QualitySettings.names.Length - 1)), true);
             var mode = Fullscreen ? FullScreenMode.FullScreenWindow : FullScreenMode.Windowed;
-            if (PlayerPrefs.HasKey(KResW))
-                Screen.SetResolution(ResWidth, ResHeight, mode);
+            if (TryGetSavedResolution(out int width, out int height))
+                Screen.SetResolution(width, height, mode);
             else
                 Screen.fullScreenMode = mode;
         }

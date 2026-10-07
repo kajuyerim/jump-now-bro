@@ -197,6 +197,42 @@ namespace JumpNowBro.Tests
             Assert.AreEqual(MoveState.Falling, s.state);
         }
 
+        [TestCase(true, false, false, 0, true)]
+        [TestCase(true, false, false, 8, false)]
+        [TestCase(true, false, true, 0, false)]
+        [TestCase(false, false, false, 0, false)]
+        [TestCase(false, true, false, 0, true)]
+        public void DashCoyote_RequiresGroundContact_AndExpires(bool startsGrounded,
+            bool touchesGround, bool endsGrounded, int waitTicks, bool canJump)
+        {
+            var t = DefaultTuning();
+            var w = new ConfigurableGroundWorld { isGrounded = startsGrounded };
+            var s = GroundedAtOrigin();
+            if (!startsGrounded) s.state = MoveState.Falling;
+            (s, _) = Movement.Step(s, new EffectiveInput { dashPressed = true }, t, Dt, w);
+            w.isGrounded = touchesGround;
+            (s, _) = Movement.Step(s, new EffectiveInput(), t, Dt, w);
+
+            // A client can be reseeded mid-dash; ground contact must survive the snapshot.
+            var snapshot = new byte[MovementState.PackedSize];
+            MovementState.Pack(s, snapshot);
+            Assert.IsTrue(MovementState.TryUnpack(snapshot, out s));
+            w.isGrounded = endsGrounded;
+            for (int i = 0; i < 30 && s.state == MoveState.Dashing; i++)
+                (s, _) = Movement.Step(s, new EffectiveInput(), t, Dt, w);
+            Assert.AreEqual(MoveState.Falling, s.state);
+            Assert.AreEqual((startsGrounded || touchesGround) && !endsGrounded ? t.coyoteTime : 0f,
+                s.coyoteTimer);
+
+            w.isGrounded = false;
+            for (int i = 0; i < waitTicks; i++)
+                (s, _) = Movement.Step(s, new EffectiveInput(), t, Dt, w);
+            EdgeFlags edges;
+            (s, edges) = Movement.Step(s, new EffectiveInput { jumpPressed = true, jumpHeld = true }, t, Dt, w);
+            Assert.AreEqual(canJump, (edges & EdgeFlags.JumpedThisTick) != 0);
+            Assert.IsFalse(s.dashChargeAvailable, "Coyote must not refund the spent dash.");
+        }
+
         // ---- Jump buffer ----
 
         [Test]
@@ -468,6 +504,7 @@ namespace JumpNowBro.Tests
             Assert.AreEqual(a.dashChargeAvailable,  b.dashChargeAvailable,  "dashChargeAvailable");
             Assert.AreEqual(a.wasJumpHeld,          b.wasJumpHeld,          "wasJumpHeld");
             Assert.AreEqual(a.isDead,               b.isDead,               "isDead");
+            Assert.AreEqual(a.dashTouchedGround,    b.dashTouchedGround,    "dashTouchedGround");
         }
     }
 }

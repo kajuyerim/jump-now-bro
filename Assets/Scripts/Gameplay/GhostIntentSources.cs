@@ -39,7 +39,8 @@ namespace JumpNowBro.Gameplay
         }
 
         public static IntentSample From(IInputSource s) =>
-            s == null ? default : new IntentSample(s.MoveLeft, s.MoveRight, s.JumpHeld);
+            s == null || (s is UnityEngine.Object obj && obj == null)
+                ? default : new IntentSample(s.MoveLeft, s.MoveRight, s.JumpHeld);
 
         public static IntentSample From(in PlayerInputFrame f) =>
             new IntentSample(f.moveLeft, f.moveRight, f.jumpHeld);

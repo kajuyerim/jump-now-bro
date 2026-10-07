@@ -1,3 +1,4 @@
+using System.Globalization;
 using NUnit.Framework;
 using JumpNowBro.Util;
 
@@ -5,6 +6,22 @@ namespace JumpNowBro.Tests
 {
     public class TimeFormatTests
     {
+        [Test]
+        public void Formatting_IsInvariantAcrossCurrentCultures()
+        {
+            var previousCulture = CultureInfo.CurrentCulture;
+            try
+            {
+                CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("fr-FR");
+                Assert.AreEqual("1:23.45", TimeFormat.MinutesSecondsCentis(83_450));
+                Assert.AreEqual("2:34:12", TimeFormat.HoursMinutesSeconds(9_252));
+            }
+            finally
+            {
+                CultureInfo.CurrentCulture = previousCulture;
+            }
+        }
+
         [Test]
         public void Zero_Formats_AsZero()
         {

@@ -88,10 +88,12 @@ callout id, `WorldPing` = an x/y f32 world marker, `Countdown` = a u32 GO-beat t
 direction alone identifies the sender, no sender byte on the wire. `Countdown` reuses the client-input-tick
 coordinate that swaps apply on, so the GO beat lands on the same logical tick on both screens; the trio
 bumped the protocol to **v5**, since a v4 peer's read boundary silently drops every comms kind and would
-leave the signals one-sided). The wire formats are **forward-compatible by
+leave the signals one-sided). **v6** adds `dashTouchedGround` in bit 3 of `MovementState`'s flags byte
+(offset 35), preserving the 46-byte layout. The handshake rejects older peers because both simulations
+must apply the same dash-coyote rule, even though old readers can ignore the bit. The wire formats are **forward-compatible by
 reserve-and-tolerate**, `MovementState`'s trailing padding bytes and the input frame's reserved bits let a
-newer sender append fields an older reader silently ignores, so new facts go on the wire without a version
-bump. Every deserializer is bounds-checked and **returns `false` instead of throwing** on a short or
+newer sender append fields an older reader silently ignores. Additions that change simulation or session
+behavior still require a version bump. Every deserializer is bounds-checked and **returns `false` instead of throwing** on a short or
 malformed buffer; out-of-range enum bytes are rejected (no conjuring a fake "P3" owner from a corrupt
 `STATE`), and a malformed datagram is still mined for its piggybacked acks and liveness timestamp before
 being dropped, the receive loop cannot be crashed by a short packet.
@@ -99,6 +101,24 @@ being dropped, the receive loop cannot be crashed by a short packet.
 ---
 
 ## Reliability: per-message seq, piggybacked acks, RTT-timed retransmit
+
+`NetworkManager` holds `IReliableTransport` and constructs it through `IReliableTransportFactory`.
+The message interface declares the backlog/drop/loss counters, warning sink and keepalive cadence the
+manager needs. `Session` requests a `SendHelloProbe`; the UDP backend alone decides to reserve message
+sequence 1 and reuse it for retries. A native backend can deliver repeated HELLO messages without
+exposing sequence numbers to the session.
+
+The default factory still accepts a LAN `IDatagramChannel`. It does not abstract UDP binding, peer
+discovery or the host's raw HELLO pre-seeding. Online/Steam support needs a separate connection bootstrap
+and native message transport; its reliability replaces the custom UDP ack/retry layer. The app message
+formats, session handlers and prediction code remain the reusable layer.
+
+Standalone players run in the background so losing window focus does not suspend session pumping.
+Gameplay UDP sockets admit at most 256 queued datagrams (over four seconds of 60 Hz INPUT traffic).
+During a main-thread drain gap, new arrivals are dropped once that bound is reached; queued packets
+keep FIFO order. Reliable messages retransmit, and newer INPUT/STATE resumes after draining. Discovery
+uses its own smaller bound. This bounds the retained backlog rather than growing it for the whole pause;
+a main-thread stall longer than the silence timeout can still disconnect, independently of window focus.
 
 Reliability keys on a **stable per-message sequence number**, not the packet-seq the header carries, this
 is what lets a reliable `EVENT` survive loss and out-of-order arrival without head-of-line-blocking the

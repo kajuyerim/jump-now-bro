@@ -36,10 +36,11 @@ namespace JumpNowBro.Networking
         double lastReceivedAt;                          // clock of the last inbound datagram (liveness baseline)
         bool connected;
         bool livenessArmed;                             // the silence timeout only runs after the first inbound
+        bool helloQueued;
         int droppedDatagrams;                           // malformed / unknown-type inbound, dropped after ack-harvest (diagnostic)
         int oversizedSends;                             // outbound bodies over the MTU ceiling, dropped (diagnostic)
 
-        public UdpReliableTransport(IDatagramChannel channel, double pingIntervalSeconds = 1.0, double silenceTimeoutSeconds = 5.0)
+        public UdpReliableTransport(IDatagramChannel channel, double pingIntervalSeconds = 1.0, double silenceTimeoutSeconds = NetworkTuning.SilenceTimeoutSeconds)
         {
             this.channel = channel;
             pingInterval = pingIntervalSeconds;
@@ -52,12 +53,12 @@ namespace JumpNowBro.Networking
         public int PacketsAccepted => packetsAccepted;               // quality-monitor loss inputs (#132)
         public int PacketsMissed => packetsMissed;
         public bool Connected => connected;
-        public int PendingReliableCount => sendQueue.PendingCount;   // for tests/diagnostics; not on the interface
+        public int PendingReliableCount => sendQueue.PendingCount;
         public int DroppedDatagrams => droppedDatagrams;             // malformed/unknown inbound dropped (diagnostic)
         public int OversizedSends => oversizedSends;                 // outbound over-MTU drops (diagnostic)
         /// Loud-log sink for should-never-happen drops (oversized send). Engine-free: the Runtime layer wires
-        /// this to Debug.LogWarning; stays null in CI. Not on the interface.
-        public Action<string> Logger;
+        /// this to Debug.LogWarning; stays null in CI.
+        public Action<string> Logger { get; set; }
         public event Action OnConnected;
         public event Action OnDisconnected;
 
@@ -82,9 +83,18 @@ namespace JumpNowBro.Networking
             else SendFramed(type, 0, payload, NowMs());
         }
 
-        // Handshake re-probe primitive: frame and send a reliable-typed message immediately under a
-        // caller-fixed message-seq, without enqueuing it for retransmit. See IReliableTransport for why
-        // the seq must stay constant across probes (the peer's in-order receive buffer dedupes them).
+        public void SendHelloProbe(ReadOnlySpan<byte> payload)
+        {
+            if (!helloQueued)
+            {
+                Send(Channel.Reliable, MessageType.Hello, payload); // reserve seq 1; later EVENT/GOODBYE uses 2
+                helloQueued = true;
+            }
+            else SendReliableFixedSeq(MessageType.Hello, 1, payload);
+        }
+
+        // UDP-specific primitive: repeated HELLOs reuse seq 1 without queuing new messages. A late
+        // host's ordered receive buffer can then deliver its first probe without waiting for gaps.
         public void SendReliableFixedSeq(MessageType type, ushort messageSeq, ReadOnlySpan<byte> payload)
         {
             if (!IsReliable(type))

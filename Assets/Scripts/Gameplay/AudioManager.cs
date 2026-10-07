@@ -82,6 +82,8 @@ namespace JumpNowBro.Gameplay
             if (musicClip != null) { music.clip = musicClip; music.Play(); }
         }
 
+        void OnDestroy() { if (Instance == this) Instance = null; }
+
         // Apply audio levels in Start, not Awake: AudioMixer.SetFloat on exposed params can be silently
         // overwritten by the startup snapshot transition on frame 1 if set in Awake. Saved settings (#128) win;
         // with nothing saved, the serialized defaults reproduce the pre-settings behaviour.

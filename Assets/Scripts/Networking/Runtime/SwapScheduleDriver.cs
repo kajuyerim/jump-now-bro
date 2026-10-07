@@ -13,15 +13,12 @@ namespace JumpNowBro.Networking
     /// FixedUpdate, before PlayerController (0) and ClientPredictor (−40) so the flipped map is the one they
     /// route input through this tick.
     [DefaultExecutionOrder(-45)]
-    public sealed class SwapScheduleDriver : MonoBehaviour
+    public sealed class SwapScheduleDriver : GatedSimulationBehaviour
     {
         public static SwapScheduleDriver Instance { get; private set; }
 
         // Telegraph + network slack before a swap applies, in client ticks. Floored for a readable telegraph,
         // raised toward the RTT when hosting, capped. v1.7 re-tunes under lag-sim.
-        const int BaseLeadTicks = 9;     // ~0.15 s at 60 Hz
-        const int LeadFloor     = 6;     // ~0.1 s
-        const int LeadCap       = 20;
 
         public PendingSwapScheduler Scheduler { get; } = new PendingSwapScheduler();
 
@@ -55,16 +52,10 @@ namespace JumpNowBro.Networking
             if (Instance == this) Instance = null;
         }
 
-        void FixedUpdate()
-        {
-            // Don't flip into a half-loaded scene (triggers mid-destroy; HandleBeforeLevelLoad already reset
-            // us), and don't flip during the end-of-level summary hold (#130) — the clocks keep advancing
-            // under the hold, so a swap scheduled just before the goal would otherwise apply and sting behind
-            // the card. Deliberately NOT SimPaused: swaps applying during the LEVEL_READY barrier is existing
-            // behavior this must not silently change. Held-pending swaps die at the next load's ResetTo.
-            if (LevelManager.Instance != null
-                && (LevelManager.Instance.IsLoading || LevelManager.Instance.SummaryHold)) return;
+        protected override SimulationGate Gate => SimulationGate.Timeline;
 
+        protected override void SimulationTick()
+        {
             var due = Scheduler.OnTick(CurrentApplyClock);
             for (int i = 0; i < due.Count; i++)
             {
@@ -136,11 +127,11 @@ namespace JumpNowBro.Networking
 
         int Lead()
         {
-            int lead = BaseLeadTicks;
+            int lead = NetworkTuning.TelegraphBaseLeadTicks;
             var nm = NetworkManager.Instance;
             if (nm != null && nm.Role == GameRole.Hosting)
                 lead = Mathf.Max(lead, Mathf.CeilToInt(nm.CurrentRtt / Time.fixedDeltaTime) + 2);
-            return Mathf.Clamp(lead, LeadFloor, LeadCap);
+            return Mathf.Clamp(lead, NetworkTuning.TelegraphLeadFloor, NetworkTuning.TelegraphLeadCap);
         }
     }
 }

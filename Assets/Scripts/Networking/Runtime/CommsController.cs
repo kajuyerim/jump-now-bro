@@ -13,17 +13,13 @@ namespace JumpNowBro.Networking
     /// direction identifies the sender, so the local echo renders immediately and no sender byte exists.
     ///
     /// Self-spawns like SwapScheduleDriver; persists across levels; all state is transient (ResetAll).
-    public sealed class CommsController : MonoBehaviour
+    public sealed class CommsController : GatedSimulationBehaviour
     {
         public static CommsController Instance { get; private set; }
 
         // Self-throttle: nothing else rate-limits, and the reliable queue silently drops past 64 in flight.
         const float SendCooldown = 0.45f;
 
-        // SwapScheduleDriver's lead constants, duplicated: comms may not couple to the swap driver's privates.
-        const int BaseLeadTicks = 9;        // ~0.15 s at 60 Hz
-        const int LeadFloor     = 6;
-        const int LeadCap       = 20;
 
         float nextKeySendTime;              // keys 1-4 share one bucket (a re-press inside it is spam)
         float nextPingSendTime;             // pings get their own bucket — a callout must not lock out an immediate "here"
@@ -118,14 +114,11 @@ namespace JumpNowBro.Networking
             if (mouse != null && mouse.leftButton.wasPressedThisFrame) TrySendPing(mouse.position.ReadValue());
         }
 
-        // The beat driver. Gated like SwapScheduleDriver's due-loop (null-tolerant, deliberately NOT
-        // SimPaused — the loss surface clears comms via ResetAll instead), so a countdown never beats
-        // through a level load or behind the summary card; IsStale mops up one that sat under a hold.
-        void FixedUpdate()
+        protected override SimulationGate Gate => SimulationGate.Timeline;
+
+        protected override void SimulationTick()
         {
             if (!countdownActive) return;
-            var lm = LevelManager.Instance;
-            if (lm != null && (lm.IsLoading || lm.SummaryHold)) return;
             uint clock = Clock;
             if (CountdownBeats.IsStale(countdownGoTick, clock)) { countdownActive = false; return; }
             int b = CountdownBeats.CurrentBeat(countdownGoTick, clock);
@@ -168,7 +161,7 @@ namespace JumpNowBro.Networking
             {
                 var lm = LevelManager.Instance;
                 return lm != null && lm.CurrentLevelIndex >= 0 && lm.CurrentLevelIndex < lm.LevelCount
-                       && !lm.IsLoading && !victoryLatch;
+                       && !lm.SceneEventsGated && !victoryLatch;
             }
         }
 
@@ -277,11 +270,11 @@ namespace JumpNowBro.Networking
         // CurrentRtt is fed by PING/PONG on the client too. Solo reads 0 RTT and takes the base lead.
         int Lead()
         {
-            int lead = BaseLeadTicks;
+            int lead = NetworkTuning.TelegraphBaseLeadTicks;
             var nm = NetworkManager.Instance;
             if (nm != null && nm.Role != GameRole.SinglePlayer)
                 lead = Mathf.Max(lead, Mathf.CeilToInt(nm.CurrentRtt / Time.fixedDeltaTime) + 2);
-            return Mathf.Clamp(lead, LeadFloor, LeadCap);
+            return Mathf.Clamp(lead, NetworkTuning.TelegraphLeadFloor, NetworkTuning.TelegraphLeadCap);
         }
 
         static void ShowCallout(InputOwner sender, CalloutId id)

@@ -8,7 +8,7 @@ namespace JumpNowBro.Gameplay
     /// tables (a one-brain solo run and a coordinated pair run are different skills). Persisting records
     /// supersedes the old no-save-files scope the same way #128's preferences did; #139 (Steam Cloud)
     /// already expects records on disk. Bests update independently: the best time may come from one run,
-    /// the fewest deaths from another. "Completed" == a bestTimeMs key exists (written only at completion).
+    /// the fewest deaths from another. "Completed" requires a valid non-negative best time.
     public static class GameRecords
     {
         public enum Mode : byte { Solo, Lan }
@@ -33,7 +33,7 @@ namespace JumpNowBro.Gameplay
             return bestTimeMs >= 0;
         }
 
-        public static bool IsCompleted(Mode m, int level) => PlayerPrefs.HasKey(Key(m, level, "bestTimeMs"));
+        public static bool IsCompleted(Mode m, int level) => TryGetBest(m, level, out _, out _);
 
         /// Picker sublabel: "0:42.10 | 3 deaths" ("| flawless" when the fewest-deaths record is zero —
         /// that IS the flawless-ever badge, no extra key), or null when never completed in that mode.
@@ -46,13 +46,10 @@ namespace JumpNowBro.Gameplay
         {
             if (level < 0) return new RunReport { prevBestTimeMs = -1 };
 
-            var r = new RunReport { firstCompletion = !IsCompleted(m, level) };
-            int bestT = PlayerPrefs.GetInt(Key(m, level, "bestTimeMs"), int.MaxValue);
-            int bestD = PlayerPrefs.GetInt(Key(m, level, "fewestDeaths"), int.MaxValue);
-            // Sentinel is unambiguous: a stored best can never equal MaxValue (a write needs timeMs < bestT).
-            r.prevBestTimeMs = bestT == int.MaxValue ? -1 : bestT;
-            r.newBestTime = stats.timeMs < bestT;
-            r.newFewestDeaths = stats.deaths < bestD;
+            bool completed = TryGetBest(m, level, out int bestT, out int bestD);
+            var r = new RunReport { firstCompletion = !completed, prevBestTimeMs = completed ? bestT : -1 };
+            r.newBestTime = !completed || stats.timeMs < bestT;
+            r.newFewestDeaths = bestD < 0 || stats.deaths < bestD;
             if (r.newBestTime) PlayerPrefs.SetInt(Key(m, level, "bestTimeMs"), stats.timeMs);
             if (r.newFewestDeaths) PlayerPrefs.SetInt(Key(m, level, "fewestDeaths"), stats.deaths);
             r.bestTimeMs = r.newBestTime ? stats.timeMs : bestT;
@@ -94,10 +91,13 @@ namespace JumpNowBro.Gameplay
         /// One call per completed level; the caller's accounting latch keeps rejoin re-sends out.
         public static void AddLifetime(in LevelRunStats stats)
         {
-            PlayerPrefs.SetInt(KLifePlay, LifetimePlaytimeSec + (stats.timeMs + 500) / 1000);
-            PlayerPrefs.SetInt(KLifeDeaths, LifetimeDeaths + stats.deaths);
-            PlayerPrefs.SetInt(KLifeSwaps, LifetimeSwaps + stats.swaps);
+            PlayerPrefs.SetInt(KLifePlay, AddTotal(LifetimePlaytimeSec, ((long)stats.timeMs + 500) / 1000));
+            PlayerPrefs.SetInt(KLifeDeaths, AddTotal(LifetimeDeaths, stats.deaths));
+            PlayerPrefs.SetInt(KLifeSwaps, AddTotal(LifetimeSwaps, stats.swaps));
             PlayerPrefs.Save();
         }
+
+        static int AddTotal(int current, long increment) =>
+            (int)Math.Min(int.MaxValue, Math.Max(0, current) + Math.Max(0L, increment));
     }
 }

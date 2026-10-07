@@ -1,3 +1,5 @@
+using System;
+
 namespace JumpNowBro.Util
 {
     public static class TimeFormat
@@ -11,7 +13,7 @@ namespace JumpNowBro.Util
             int totalSeconds = totalCentis / 100;
             int seconds = totalSeconds % 60;
             int minutes = totalSeconds / 60;
-            return $"{minutes}:{seconds:D2}.{centis:D2}";
+            return FormattableString.Invariant($"{minutes}:{seconds:D2}.{centis:D2}");
         }
 
         /// Signed PB delta, "-0:02.31" / "+0:04.10" (zero reads "+0:00.00" — an equal time is not a
@@ -30,7 +32,7 @@ namespace JumpNowBro.Util
             int seconds = totalSeconds % 60;
             int minutes = totalSeconds / 60 % 60;
             int hours = totalSeconds / 3600;
-            return $"{hours}:{minutes:D2}:{seconds:D2}";
+            return FormattableString.Invariant($"{hours}:{minutes:D2}:{seconds:D2}");
         }
     }
 }

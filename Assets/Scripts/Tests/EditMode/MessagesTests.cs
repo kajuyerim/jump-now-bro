@@ -101,7 +101,7 @@ namespace JumpNowBro.Tests
             state = MoveState.Dashing, facing = -1,
             coyoteTimer = 0.08f, jumpBufferTimer = 0.0f, dashTimer = 0.12f, invulnTimer = 0.05f,
             freezeTicksRemaining = 3,
-            dashChargeAvailable = false, wasJumpHeld = true, isDead = false,
+            dashChargeAvailable = false, wasJumpHeld = true, isDead = false, dashTouchedGround = true,
         };
 
         [Test]
@@ -126,6 +126,7 @@ namespace JumpNowBro.Tests
             Assert.AreEqual(s.dashChargeAvailable, rt.dashChargeAvailable);
             Assert.AreEqual(s.wasJumpHeld, rt.wasJumpHeld);
             Assert.AreEqual(s.isDead, rt.isDead);
+            Assert.AreEqual(s.dashTouchedGround, rt.dashTouchedGround);
         }
 
         [Test]
@@ -133,7 +134,7 @@ namespace JumpNowBro.Tests
         {
             var s = new MovementState
             {
-                dashChargeAvailable = true, wasJumpHeld = true, isDead = true,
+                dashChargeAvailable = true, wasJumpHeld = true, isDead = true, dashTouchedGround = true,
                 facing = 1, state = MoveState.Grounded,
             };
             var buf = new byte[MovementState.PackedSize];
@@ -142,6 +143,7 @@ namespace JumpNowBro.Tests
             Assert.IsTrue(rt.dashChargeAvailable);
             Assert.IsTrue(rt.wasJumpHeld);
             Assert.IsTrue(rt.isDead);
+            Assert.IsTrue(rt.dashTouchedGround);
         }
 
         [Test]
@@ -161,6 +163,7 @@ namespace JumpNowBro.Tests
             Assert.IsTrue(MovementState.TryUnpack(trimmed, out var rt));
             Assert.AreEqual(s.posX, rt.posX);
             Assert.AreEqual(s.isDead, rt.isDead);
+            Assert.AreEqual(s.dashTouchedGround, rt.dashTouchedGround);
         }
 
         [Test]

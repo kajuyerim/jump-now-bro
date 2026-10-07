@@ -1,12 +1,15 @@
 using System.Collections;
 using System.Net;
 using System.Reflection;
+using System.Text.RegularExpressions;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.TestTools;
 using UnityEngine.UI;
 using JumpNowBro.Networking;
+using JumpNowBro.Gameplay;
+using JumpNowBro.Util;
 
 namespace JumpNowBro.Tests.PlayMode
 {
@@ -87,6 +90,7 @@ namespace JumpNowBro.Tests.PlayMode
         [UnityTest]
         public IEnumerator DiscoveredButtonJoinsAdvertisedPort_ManualJoinUsesDefault_RejoinRetainsPort()
         {
+            Invoke(menu, "DisposeBrowse");
             advertisedHost = new UdpHost();
             defaultHost = new UdpHost();
             Set(client, "gameplayPort", defaultHost.Port);
@@ -145,8 +149,201 @@ namespace JumpNowBro.Tests.PlayMode
         }
 
         [UnityTest]
+        public IEnumerator Manager_UsesMessageTransportFactory_AndItsDiagnostics()
+        {
+            var previous = client.TransportFactory;
+            var backend = new MessageTransport();
+            try
+            {
+                Set(client, "discoveryPort", (ushort)0);
+                client.TransportFactory = backend;
+                client.BeginClientFromUi("127.0.0.1", "contract-client");
+                float deadline = Time.realtimeSinceStartup + 3f;
+                while (!client.PeerConnected && Time.realtimeSinceStartup < deadline) yield return null;
+                Assert.IsTrue(client.PeerConnected, "The manager must establish through a non-UDP implementation.");
+                Assert.AreSame(backend, client.CurrentTransport);
+                Assert.GreaterOrEqual(backend.Probes, 2, "The backend owns how repeated probes are delivered.");
+                Assert.AreEqual(7, client.PendingReliableCount);
+                Assert.AreEqual(2, client.DroppedDatagrams);
+                Assert.That(client.QualityReadout, Does.Contain("125 ms"));
+                Assert.AreEqual(1.0, backend.PingInterval);
+                LogAssert.Expect(LogType.Warning, "[net] contract warning");
+                backend.Logger("contract warning");
+                backend.Disconnect();
+                Assert.IsTrue(client.ConnectionLost);
+            }
+            finally
+            {
+                client.EndSessionFromUi();
+                client.TransportFactory = previous;
+            }
+        }
+
+        [Test]
+        public void ManagerTeardown_ReleasesSocketAndSubscriptions_WhenGoodbyeThrows()
+        {
+            var backend = new MessageTransport();
+            var previous = client.TransportFactory;
+            bool wasEnabled = client.enabled;
+            try
+            {
+                Set(client, "discoveryPort", (ushort)0);
+                client.TransportFactory = backend;
+                client.BeginClientFromUi("127.0.0.1", "cleanup-client");
+                int port = Get<UdpSocket>(client, "gameplaySocket").LocalPort;
+                backend.ThrowOnSend = true;
+                LogAssert.Expect(LogType.Exception, new Regex("InvalidOperationException: test goodbye failure"));
+                // MainMenuUI requires this component; exercise teardown without removing Bootstrap's manager.
+                client.enabled = false;
+                Invoke(client, "OnDestroy");
+                Assert.IsNull(NetworkManager.Instance);
+                using (var rebound = new UdpSocket(port)) Assert.AreEqual(port, rebound.LocalPort);
+                foreach (string eventName in new[] { "OnBeforeLevelLoad", "OnLevelLoaded" })
+                {
+                    var handlers = Get<System.Delegate>(LevelManager.Instance, eventName);
+                    foreach (var handler in handlers?.GetInvocationList() ?? new System.Delegate[0])
+                        Assert.AreNotSame(client, handler.Target, "Destroyed managers must unsubscribe.");
+                }
+            }
+            finally
+            {
+                backend.ThrowOnSend = false;
+                client.EndSessionFromUi();
+                client.TransportFactory = previous;
+                Invoke(client, "Awake");
+                Invoke(client, "Start");
+                client.enabled = wasEnabled;
+            }
+        }
+
+        // Message-level backend with no UDP sequencing: reply to the second connection probe.
+        sealed class MessageTransport : IReliableTransport, IReliableTransportFactory
+        {
+            bool welcomed;
+            public int Probes;
+            public bool ThrowOnSend;
+            public double PingInterval;
+            public float RttSeconds => 0.125f;
+            public bool Connected => welcomed;
+            public int PendingReliableCount => 7;
+            public int DroppedDatagrams => 2;
+            public int PacketsAccepted => 12;
+            public int PacketsMissed => 3;
+            public System.Action<string> Logger { get; set; }
+            public event System.Action OnConnected { add { } remove { } }
+            public event System.Action OnDisconnected;
+            public IReliableTransport Create(IDatagramChannel channel) => this;
+            public void SendHelloProbe(System.ReadOnlySpan<byte> payload) => Probes++;
+            public void SetPingInterval(double seconds) => PingInterval = seconds;
+            public void Tick(float dt) { }
+            public void Send(Channel channel, MessageType type, System.ReadOnlySpan<byte> payload)
+            {
+                if (ThrowOnSend) throw new System.InvalidOperationException("test goodbye failure");
+            }
+            public void Disconnect() => OnDisconnected?.Invoke();
+            public bool TryReceive(out MessageType type, out byte[] payload)
+            {
+                type = MessageType.Welcome;
+                payload = null;
+                if (welcomed || Probes < 2) return false;
+                welcomed = true;
+                payload = new byte[128];
+                new Welcome { Magic = SessionProtocol.Magic, Version = SessionProtocol.Version, Accepted = true,
+                    PeerOwner = InputOwner.P2, CurrentSceneIndex = 0xFF, Name = "contract-host" }.Write(payload);
+                return true;
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator SummaryHold_PreservesInputEdges_WhileSessionKeepalivesContinue()
+        {
+            advertisedHost = new UdpHost();
+            Set(client, "discoveryPort", (ushort)0);
+            client.BeginClientFromUi("127.0.0.1", "held-input-client", advertisedHost.Port);
+            yield return WaitForEstablished(advertisedHost, 8f);
+            Assert.AreEqual(Session.SessionState.Established, client.CurrentSessionState);
+            var level = LevelManager.Instance;
+            bool previousHold = level.SummaryHold;
+            var go = new GameObject("HeldInputSenderTest");
+            var sender = go.AddComponent<ClientInputSender>();
+            sender.enabled = false; // Invoke exact ticks so the first resumed frame can be inspected.
+            var input = new LatchedInput();
+            sender.Bind(input, client.CurrentTransport, TickClock.Instance);
+            try
+            {
+                level.SummaryHold = true;
+                for (int i = 0; i < 3; i++) Invoke(sender, "FixedUpdate");
+                Assert.AreEqual(0, input.Ticks, "a gated sender must not consume local edges");
+                float deadline = Time.realtimeSinceStartup + 6f; // exceeds the five-second liveness timeout
+                while (Time.realtimeSinceStartup < deadline)
+                {
+                    advertisedHost.Pump(Time.unscaledDeltaTime);
+                    yield return null;
+                }
+                Assert.AreEqual(Session.SessionState.Established, client.CurrentSessionState);
+                Assert.IsFalse(client.ConnectionLost, "summary gating must leave keepalives running");
+                level.SummaryHold = false;
+                Invoke(sender, "FixedUpdate");
+                Assert.IsTrue(sender.LastSampledFrame.jumpPressed);
+                Assert.IsTrue(sender.LastSampledFrame.dashPressed);
+                Assert.AreEqual(1, input.Ticks);
+                Invoke(sender, "FixedUpdate");
+                Assert.IsFalse(sender.LastSampledFrame.jumpPressed, "the edge must be consumed exactly once");
+                Assert.IsFalse(sender.LastSampledFrame.dashPressed);
+            }
+            finally
+            {
+                level.SummaryHold = previousHold;
+                Object.Destroy(go);
+            }
+        }
+
+        sealed class LatchedInput : IInputSource
+        {
+            public int Ticks;
+            public bool MoveLeft => false;
+            public bool MoveRight => false;
+            public bool JumpPressed => Ticks == 0;
+            public bool JumpHeld => true;
+            public bool DashPressed => Ticks == 0;
+            public void Tick() => Ticks++;
+        }
+
+        [UnityTest]
+        public IEnumerator DiscoveryBindFailure_BacksOff_ThenRecoversWhenPortIsReleased()
+        {
+            Invoke(menu, "DisposeBrowse");
+            using var occupied = new UdpSocket(0);
+            Set(client, "discoveryPort", (ushort)occupied.LocalPort);
+            LogAssert.Expect(LogType.Warning, new Regex(@"LAN discovery could not listen on port \d+: .+ Retrying every 5 seconds\."));
+            Invoke(menu, "Update");
+            yield return null;
+            Assert.IsNull(Get<DiscoveryService>(menu, "browse"));
+
+            // Keep the port occupied through another retry: repeated failures must not spam the Console.
+            yield return new WaitForSecondsRealtime(5.2f);
+            LogAssert.NoUnexpectedReceived();
+            occupied.Dispose();
+            yield return new WaitForSecondsRealtime(1f);
+            Assert.IsNull(Get<DiscoveryService>(menu, "browse"), "releasing the port must not bypass the retry interval");
+
+            float deadline = Time.realtimeSinceStartup + 5f;
+            while (Get<DiscoveryService>(menu, "browse") == null && Time.realtimeSinceStartup < deadline)
+                yield return null;
+            browse = Get<DiscoveryService>(menu, "browse");
+            Assert.IsNotNull(browse, "discovery should recover on the next retry without leaving the menu");
+            Assert.AreEqual(0, browse.Hosts.Count, "an empty LAN is a normal successful discovery state");
+            using var sender = new UdpSocket(0);
+            SendBeacon(sender, new IPEndPoint(IPAddress.Loopback, occupied.LocalPort), new byte[64], 12345);
+            deadline = Time.realtimeSinceStartup + 3f;
+            while (browse.Hosts.Count == 0 && Time.realtimeSinceStartup < deadline) yield return null;
+            Assert.AreEqual(1, browse.Hosts.Count, "the recovered listener must discover real beacons");
+        }
+
+        [UnityTest]
         public IEnumerator DiscoveryMenu_ListsSeveralHosts_AndStaysBoundedDuringFlood()
         {
+            Invoke(menu, "DisposeBrowse");
             Set(client, "discoveryPort", (ushort)0);
             browse = DiscoveryService.StartClient(0);
             Set(menu, "browse", browse);

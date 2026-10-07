@@ -6,6 +6,12 @@ namespace JumpNowBro.Tests
     public class TransportLivenessTests
     {
         [Test]
+        public void LevelBarrierTimeout_PrecedesTransportSilenceTimeout()
+        {
+            Assert.Less(NetworkTuning.LevelBarrierTimeoutSeconds, NetworkTuning.SilenceTimeoutSeconds);
+        }
+
+        [Test]
         public void Liveness_FiresAfterSilence()
         {
             var (ca, cb) = InMemoryDatagramChannel.Pair();

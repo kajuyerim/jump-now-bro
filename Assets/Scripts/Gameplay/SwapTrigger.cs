@@ -65,7 +65,7 @@ namespace JumpNowBro.Gameplay
             var player = LocalPlayer();
             if (player == null) return;
             float t = Mathf.InverseLerp(ProximityFar, ProximityNear, Vector2.Distance(player.position, (Vector2)col.bounds.center));
-            if (t > 0.001f) GameHudOverlay.Instance?.ReportProximity(t, actionToSwap);
+            if (t > 0.001f && GameHudOverlay.Instance != null) GameHudOverlay.Instance.ReportProximity(t, actionToSwap);
         }
 
         static Transform LocalPlayer()
