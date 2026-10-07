@@ -42,33 +42,35 @@ Font Name.
 
 The project notice does not assert exclusive rights over the CC0 artwork.
 
-## Audio: provenance unresolved; replacement required before launch
+## Audio
 
-The following sounds were downloaded from the internet. Their original authors,
-source URLs, and redistribution licences have not yet been documented:
+The four gameplay effects were synthesized for JumpNowBro on 2026-10-07 with
+Codex assistance, using only mathematical oscillators and seeded noise. No external
+recordings, samples, soundfonts, or downloaded audio were used. Their complete source
+recipe is [scripts/generate-sfx.py](scripts/generate-sfx.py); run it with Python 3 to
+regenerate the 44.1 kHz, mono, 16-bit PCM WAVs. The source and generated clips are
+project material covered by the repository's [LICENSE](LICENSE), with no additional
+third-party audio attribution.
 
-- `Assets/Audio/SFX/jump_bfxr.wav`
-- `Assets/Audio/SFX/dash_bfxr.wav`
-- `Assets/Audio/SFX/land_bfxr.wav`
-- `Assets/Audio/SFX/swap_bfxr.wav`
+| File under `Assets/Audio/SFX/` | Cue | Duration |
+| --- | --- | --- |
+| `player_jump.wav` | Rising tone | 280 ms |
+| `player_land.wav` | Short low impact | 60 ms |
+| `player_dash.wav` | Noise and falling tone | 240 ms |
+| `control_swap.wav` | Two-tone chime | 420 ms |
 
-The `_bfxr` filenames do not establish authorship or permission. These files are
-tracked in the source repository, so source redistribution also needs to be
-resolved. Replace them with original or appropriately licensed sounds, or document
-the original permissions and required credits before further redistribution.
-Listing them here does not grant permission or establish licence compliance.
+These replace the four undocumented downloaded `*_bfxr.wav` files. The old clips
+are absent from the current asset set; this replacement does not establish rights
+for their earlier versions in Git history.
 
-The tracked `.mp3` SFX and music were introduced as silent placeholders. A local
-checkout can substitute a real track into `Assets/Audio/Music/music_loop.mp3`;
-Unity includes the assigned local audio in a build even if Git ignores that change.
-The current substituted music is also internet-sourced with unverified licensing
-and is planned for replacement before launch. Do not infer commercial rights from
-the earlier music README's description of it as "licensed". See the
-[music notes](Assets/Audio/Music/README.md) for the replacement workflow.
+`Assets/Audio/Music/music_loop.mp3` and the four communication MP3s (`callout`,
+`ping`, `count_beat`, `count_go`) are silent placeholders. The undocumented local
+music substitution was removed from the project. Communication sound replacements
+remain tracked separately in issues #155–#158.
 
-Before distributing a build, replace or verify every real audio clip and record
-its creator, source, licence, and any required attribution here. A silent placeholder
-in Git is not evidence that a locally built player contains only silent audio.
+For future audio additions, record the creator, source, terms, and required credits
+here. Unity builds use the local assets, so check the actual build inputs as well as
+Git. See the [music notes](Assets/Audio/Music/README.md).
 
 ## Unity and packages
 
@@ -97,5 +99,4 @@ are under `<Player>_Data/StreamingAssets/Legal`; on macOS they are inside the ap
 bundle at `Contents/Resources/Data/StreamingAssets/Legal`.
 
 When verifying a release, inspect that directory in the actual built player and
-check that each file matches its source. Presence of notices does not clear the
-unresolved audio permissions above.
+check that each file matches its source and that the audio matches this inventory.
