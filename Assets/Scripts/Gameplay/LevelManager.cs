@@ -8,6 +8,8 @@ namespace JumpNowBro.Gameplay
 {
     public class LevelManager : MonoBehaviour
     {
+        public const string TrainingSceneName = "Level_Training";
+
         public static LevelManager Instance { get; private set; }
 
         [SerializeField] string[] levelSceneNames;
@@ -71,6 +73,16 @@ namespace JumpNowBro.Gameplay
 
         public int LevelCount => levelSceneNames != null ? levelSceneNames.Length : 0;
 
+        public bool IsTraining(int index) =>
+            levelSceneNames != null && index >= 0 && index < levelSceneNames.Length
+            && levelSceneNames[index] == TrainingSceneName;
+
+        public string GetLevelDisplayName(int index)
+        {
+            if (IsTraining(index)) return "Training";
+            return index >= 0 && index < LevelCount ? $"Level {index + 1}" : null;
+        }
+
         /// Fires at the end of LoadLevelRoutine with the loaded index — the client uses this to send LEVEL_READY.
         public event Action<int> OnLevelLoaded;
 
@@ -111,7 +123,14 @@ namespace JumpNowBro.Gameplay
 
         public void LoadNext()
         {
+            if (IsTraining(currentLevelIndex))
+            {
+                LoadByIndex(0);
+                return;
+            }
+
             currentLevelIndex++;
+            if (IsTraining(currentLevelIndex)) currentLevelIndex++;
             if (levelSceneNames == null || currentLevelIndex >= levelSceneNames.Length)
             {
                 Debug.Log("LevelManager: all levels complete.");

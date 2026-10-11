@@ -171,7 +171,7 @@ namespace JumpNowBro.Tests.PlayMode
             // Step in with small MovePositions. A single large MovePosition gets distance-clamped per physics
             // step and never reaches the trigger, so sweep it in over short hops to fire a clean OnTriggerEnter2D.
             const int steps = 8;
-            for (int i = 1; i <= steps; i++)
+            for (int i = 1; i <= steps && rb != null; i++)
             {
                 rb.MovePosition(Vector2.Lerp(from, center, i / (float)steps));
                 yield return new WaitForFixedUpdate();
@@ -334,6 +334,81 @@ namespace JumpNowBro.Tests.PlayMode
             finally { player.OnDash -= OnDash; }
         }
 
+        [UnityTest]
+        public IEnumerator TrainingScene_HasSafeDashRecoveryAndConfiguredGuidance()
+        {
+            yield return LoadLevelAndGrabPlayer(LevelManager.TrainingSceneName);
+            var scene = SceneManager.GetSceneByName(LevelManager.TrainingSceneName);
+            Assert.IsTrue(scene.IsValid() && scene.isLoaded, "Training must be a real loadable scene.");
+            Assert.AreEqual(0, ComponentsIn<Hazard>(scene).Count, "Training should not contain damaging hazards.");
+
+            var training = ComponentsIn<TrainingLevel>(scene).SingleOrDefault();
+            Assert.IsNotNull(training, "Training scene must have exactly one TrainingLevel behaviour.");
+            var portal = (SwapTrigger)GetField(training, "movePortal");
+            var jumpObstacle = (Transform)GetField(training, "jumpObstacle");
+            var dashLanding = (Transform)GetField(training, "dashLanding");
+            Assert.IsNotNull(portal, "TrainingLevel.movePortal is not wired.");
+            Assert.IsNotNull(jumpObstacle, "TrainingLevel.jumpObstacle is not wired.");
+            Assert.IsNotNull(dashLanding, "TrainingLevel.dashLanding is not wired.");
+            Assert.AreEqual(scene, portal.gameObject.scene);
+            Assert.AreEqual(scene, jumpObstacle.gameObject.scene);
+            Assert.AreEqual(scene, dashLanding.gameObject.scene);
+
+            var start = GameObjectsIn(scene).Single(go => go.name == "StartPlatform").GetComponent<BoxCollider2D>();
+            var landing = GameObjectsIn(scene).Single(go => go.name == "LandingPlatform").GetComponent<BoxCollider2D>();
+            var recovery = GameObjectsIn(scene).Single(go => go.name == "RecoveryFloor").GetComponent<BoxCollider2D>();
+            Assert.IsNotNull(start);
+            Assert.IsNotNull(landing);
+            Assert.IsNotNull(recovery);
+            Assert.IsFalse(recovery.isTrigger, "The recovery floor must be solid ground, not a trigger.");
+            float gapX = (start.bounds.max.x + landing.bounds.min.x) * 0.5f;
+            Assert.That(gapX, Is.GreaterThan(start.bounds.max.x));
+            Assert.That(gapX, Is.LessThan(landing.bounds.min.x));
+            Assert.That(gapX, Is.InRange(recovery.bounds.min.x, recovery.bounds.max.x),
+                "Solid recovery ground must span beneath the dash gap.");
+            Assert.That(recovery.bounds.max.y, Is.LessThan(start.bounds.max.y),
+                "Recovery ground must sit below the platforms around the dash gap.");
+        }
+
+        [UnityTest]
+        public IEnumerator CampaignLoadNext_SkipsTrainingAndFiresVictorySentinel()
+        {
+            yield return null; // Bootstrap's managers and the configured level list are ready.
+            var lm = LevelManager.Instance;
+            Assert.IsNotNull(lm);
+            Assert.IsTrue(lm.IsTraining(3));
+            Assert.AreEqual(4, lm.LevelCount);
+            int oldIndex = lm.CurrentLevelIndex;
+            string oldLoadedScene = (string)GetField(lm, "currentlyLoadedScene");
+            bool oldSummaryHold = lm.SummaryHold;
+            int beforeCount = 0, beforeIndex = -1, completeCount = 0;
+            void OnBefore(int index) { beforeCount++; beforeIndex = index; }
+            void OnComplete() => completeCount++;
+            lm.OnBeforeLevelLoad += OnBefore;
+            lm.OnAllLevelsComplete += OnComplete;
+            try
+            {
+                SetField(lm, "currentLevelIndex", 2);
+                lm.LoadNext();
+
+                Assert.AreEqual(1, beforeCount);
+                Assert.AreEqual(LevelManager.AllLevelsCompleteSentinel, beforeIndex);
+                Assert.AreEqual(1, completeCount);
+                Assert.AreEqual(lm.LevelCount, lm.CurrentLevelIndex,
+                    "The completed campaign index must remain outside the real scene range for post-victory joins.");
+            }
+            finally
+            {
+                lm.OnBeforeLevelLoad -= OnBefore;
+                lm.OnAllLevelsComplete -= OnComplete;
+                SetField(lm, "currentLevelIndex", oldIndex);
+                SetField(lm, "currentlyLoadedScene", oldLoadedScene);
+                lm.SummaryHold = oldSummaryHold;
+                if (CommsController.Instance != null) CommsController.Instance.ResetAll();
+                if (CompleteScreen.Instance != null) CompleteScreen.Instance.HidePanel();
+            }
+        }
+
         sealed class HazardTestInput : IInputSource
         {
             public bool moveRight, jumpPressed, jumpHeld, dashPressed;
@@ -409,11 +484,69 @@ namespace JumpNowBro.Tests.PlayMode
             expected.AssertRestored();
         }
 
+        [UnityTest]
+        public IEnumerator TrainingGoal_LoadsLevelOneWithoutSummaryOrCompetitiveAccounting()
+        {
+            yield return LoadLevelAndGrabPlayer(LevelManager.TrainingSceneName);
+            var lm = LevelManager.Instance;
+            var rsc = RunSummaryController.Instance;
+            Assert.IsNotNull(lm);
+            Assert.IsNotNull(rsc);
+            Assert.IsTrue(lm.IsTraining(3), "Training is expected at index 3, after the competitive level IDs.");
+            var goal = Object.FindAnyObjectByType<LevelGoal>();
+            Assert.IsNotNull(goal, "Training must have an exit goal.");
+
+            string oldLoadedScene = (string)GetField(lm, "currentlyLoadedScene");
+            var state = new GoalTestState(lm, rsc);
+            var totalsBefore = rsc.Totals;
+            bool sawLevelOneLoad = false;
+            void OnBefore(int index) { if (index == 0) sawLevelOneLoad = true; }
+            lm.OnBeforeLevelLoad += OnBefore;
+            try
+            {
+                // A raw additive test load does not update LevelManager's scene bookkeeping.
+                SetField(lm, "currentLevelIndex", 3);
+                SetField(lm, "currentlyLoadedScene", LevelManager.TrainingSceneName);
+                ((LevelRunTracker)GetField(rsc, "tracker")).Begin();
+                yield return DriveInto(goal.GetComponent<Collider2D>());
+
+                for (int i = 0; i < 120 && (lm.IsLoading || !SceneManager.GetSceneByName("Level_01").isLoaded); i++)
+                    yield return null;
+
+                Assert.IsFalse(lm.IsLoading, "Training exit should finish its real scene transition.");
+                Assert.IsTrue(sawLevelOneLoad, "Training exit must use LevelManager's normal index-0 load path.");
+                Assert.AreEqual(0, lm.CurrentLevelIndex);
+                Assert.IsTrue(SceneManager.GetSceneByName("Level_01").isLoaded);
+                Assert.IsFalse(SceneManager.GetSceneByName(LevelManager.TrainingSceneName).isLoaded);
+                Assert.IsFalse(rsc.HoldActive, "Training completion must not show the competitive summary.");
+                Assert.IsFalse(lm.SummaryHold);
+                Assert.AreEqual(totalsBefore.levels, rsc.Totals.levels);
+                Assert.AreEqual(totalsBefore.timeMs, rsc.Totals.timeMs);
+                Assert.AreEqual(totalsBefore.deaths, rsc.Totals.deaths);
+                Assert.AreEqual(totalsBefore.swaps, rsc.Totals.swaps);
+                Assert.AreEqual(totalsBefore.bestStreakMs, rsc.Totals.bestStreakMs);
+                state.AssertPreferencesUnchanged();
+
+            }
+            finally
+            {
+                // A goal can replace the player before either success or an assertion failure.
+                playerGo = PlayerSpawner.Instance.CurrentPlayerInstance;
+                player = PlayerSpawner.Instance.CurrentPlayer;
+                if (player != null) player.Inject(null, null);
+                lm.OnBeforeLevelLoad -= OnBefore;
+                SetField(lm, "currentlyLoadedScene", oldLoadedScene);
+                state.Dispose();
+            }
+        }
+
         sealed class GoalTestState : System.IDisposable
         {
             public static readonly string[] Keys =
             {
                 "records.solo.level0.bestTimeMs", "records.solo.level0.fewestDeaths",
+                "records.solo.level3.bestTimeMs", "records.solo.level3.fewestDeaths",
+                "records.lan.level3.bestTimeMs", "records.lan.level3.fewestDeaths",
                 "lifetime.playtimeSec", "lifetime.deaths", "lifetime.swaps"
             };
             readonly bool[] existed = new bool[Keys.Length];
@@ -463,6 +596,11 @@ namespace JumpNowBro.Tests.PlayMode
                 Assert.AreSame(levels, GetField(lm, "levelSceneNames"));
                 Assert.AreEqual(levelIndex, GetField(lm, "currentLevelIndex"));
                 Assert.AreEqual(summaryHold, lm.SummaryHold);
+                AssertPreferencesUnchanged();
+            }
+
+            public void AssertPreferencesUnchanged()
+            {
                 for (int i = 0; i < Keys.Length; i++)
                 {
                     Assert.AreEqual(existed[i], PlayerPrefs.HasKey(Keys[i]), Keys[i]);
@@ -470,6 +608,13 @@ namespace JumpNowBro.Tests.PlayMode
                 }
             }
         }
+
+        static List<T> ComponentsIn<T>(Scene scene) where T : Component =>
+            scene.GetRootGameObjects().SelectMany(root => root.GetComponentsInChildren<T>(true)).ToList();
+
+        static List<GameObject> GameObjectsIn(Scene scene) =>
+            scene.GetRootGameObjects().SelectMany(root => root.GetComponentsInChildren<Transform>(true))
+                .Select(transform => transform.gameObject).ToList();
 
         static object GetField(object t, string f) =>
             t.GetType().GetField(f, BindingFlags.NonPublic | BindingFlags.Instance).GetValue(t);

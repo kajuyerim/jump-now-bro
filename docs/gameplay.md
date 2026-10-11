@@ -82,3 +82,13 @@ Three short levels (`Level_01/02/03`) load **additively over a persistent `Boots
 `Bootstrap` resident (and at build index 0) is what lets the byte-encoded scene index in the protocol stay
 stable, and it's why you always start from `Bootstrap`. Starting tuning constants (run 9, jump 16, gravity 50, coyote/buffer 0.1 s, dash 4 units over 0.15 s) live on a `PlayerTuning` ScriptableObject so they
 can be iterated without touching code.
+
+`Level_Training` is an optional, repeatable course selected from the menu or LAN lobby. Solo swaps
+movement after the jump/dash practice; LAN swaps it earlier so the second player participates before
+the jump lesson. `TrainingLevel` reads the character position and synchronized control map to show
+local instructions and current bindings. Physical obstacles require jumping and dashing, with a solid
+floor and return steps below the gap. It uses the existing swap and scene-load events.
+
+Training is appended after the three campaign scene IDs to preserve saved records. Its exit loads
+Level 1 directly without a competitive summary; normal campaign progression skips Training and still
+ends after Level 3. This does not add level-unlock or saved-progression rules.

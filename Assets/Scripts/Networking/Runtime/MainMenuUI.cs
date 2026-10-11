@@ -22,8 +22,11 @@ namespace JumpNowBro.Networking
         TMP_InputField ipField, lobbyField, nameField;
         TMP_Text lostTitle, lostMsg, lostWaitLabel, pingLabel, statusBanner, unstableLabel;
         Button lostRejoinBtn, lostReturnBtn, soloBtn;
+        LevelManager levelManager;
+        int trainingIndex = -1;
         float nextPingRefresh, nextUnstableRefresh;
-        readonly Button[] levelButtons = new Button[3];
+        Button[] levelButtons = System.Array.Empty<Button>();
+        int[] levelIndices = System.Array.Empty<int>();
         DiscoveryService browse;                                           // passive LAN listener while the menu is up
         GameObject hostList;
         float nextHostRefresh;
@@ -35,7 +38,11 @@ namespace JumpNowBro.Networking
         void Awake()
         {
             net = GetComponent<NetworkManager>();
-            FindAnyObjectByType<LevelManager>()?.SuppressAutoStart();           // UI is the entry point
+            levelManager = FindAnyObjectByType<LevelManager>();
+            levelManager?.SuppressAutoStart();                                  // UI is the entry point
+            if (levelManager != null)
+                for (int i = 0; i < levelManager.LevelCount; i++)
+                    if (levelManager.IsTraining(i)) { trainingIndex = i; break; }
             Build();
             GameRecords.OnChanged += RefreshLevelRecords;                       // #129: Reset-records live-refreshes the pickers
         }
@@ -142,19 +149,25 @@ namespace JumpNowBro.Networking
                 var lbl = levelButtons[i].GetComponentInChildren<TMP_Text>();
                 if (lbl == null) continue;
                 lbl.textWrappingMode = TextWrappingModes.NoWrap;
-                string line = GameRecords.SublabelFor(GameRecords.Mode.Solo, i);
+                int index = levelIndices[i];
+                if (index == trainingIndex)
+                {
+                    lbl.text = "Training\n<size=13><color=#8FD08F>practice</color></size>";
+                    continue;
+                }
+                string line = GameRecords.SublabelFor(GameRecords.Mode.Solo, index);
                 lbl.text = line != null
-                    ? $"Level {i + 1}\n<size=13><color=#8FD08F>{line}</color></size>"
-                    : $"Level {i + 1}\n<size=13><color=#FFFFFF80>no record</color></size>";
+                    ? $"{levelManager.GetLevelDisplayName(index)}\n<size=13><color=#8FD08F>{line}</color></size>"
+                    : $"{levelManager.GetLevelDisplayName(index)}\n<size=13><color=#FFFFFF80>no record</color></size>";
             }
         }
 
         void SelectLevel(int i)
         {
-            if (LevelManager.Instance != null) LevelManager.Instance.PendingStartIndex = i;
+            if (levelManager != null) levelManager.PendingStartIndex = i;
             for (int k = 0; k < levelButtons.Length; k++)
                 levelButtons[k].GetComponent<Image>().color =
-                    k == i ? new Color(0.30f, 0.55f, 0.95f, 1f) : new Color(1f, 1f, 1f, 0.15f);
+                    levelIndices[k] == i ? new Color(0.30f, 0.55f, 0.95f, 1f) : new Color(1f, 1f, 1f, 0.15f);
         }
 
         void Build()
@@ -188,12 +201,16 @@ namespace JumpNowBro.Networking
             Label(col.transform, "Pick a level, then choose how to play", 20, FontStyles.Normal);
 
             var lvlRow = Row(col.transform, 12);
-            for (int i = 0; i < 3; i++)
+            int count = levelManager != null ? levelManager.LevelCount : 0;
+            levelButtons = new Button[count];
+            levelIndices = new int[count];
+            int button = 0;
+            if (trainingIndex >= 0)
             {
-                int idx = i;
-                // Taller than the other menu buttons: line 2 carries the solo record sublabel (#129).
-                levelButtons[i] = MakeButton(lvlRow.transform, "Level " + (i + 1), 150, 68, () => SelectLevel(idx));
+                AddLevelButton(lvlRow.transform, button++, trainingIndex);
             }
+            for (int i = 0; i < count; i++)
+                if (i != trainingIndex) AddLevelButton(lvlRow.transform, button++, i);
             RefreshLevelRecords();
 
             soloBtn = MakeButton(col.transform, "Solo (single-player)", 330, 54, () => { DisposeBrowse(); net.BeginSoloFromUi(); });
@@ -278,6 +295,13 @@ namespace JumpNowBro.Networking
             statusBanner.gameObject.SetActive(false);
 
             BuildLostOverlay(canvasGo.transform);
+        }
+
+        void AddLevelButton(Transform parent, int button, int index)
+        {
+            levelIndices[button] = index;
+            string label = levelManager.GetLevelDisplayName(index);
+            levelButtons[button] = MakeButton(parent, label, 150, 68, () => SelectLevel(index));
         }
 
         // Connection-lost overlay (replaces ConnectionUI's IMGUI box): a full-screen dim behind a centered
