@@ -18,10 +18,15 @@ namespace JumpNowBro.Networking
         [SerializeField] Vector3 soloSwapPosition = new Vector3(28, 2, 0);
         [SerializeField] Vector3 multiplayerSwapPosition = new Vector3(4, 2, 0);
 
+        const float MinimumNoteSeconds = 5f;
         bool multiplayer;
+        int note;
+        float furthestX = float.NegativeInfinity;
+        float noteVisibleSeconds;
+        RectTransform canvasRect, panelRect;
         GameObject panel;
         TMP_Text heading, instruction, controls;
-        float nextRefresh;
+        float nextRefresh, lastRefresh;
 
         public string Instructions => instruction != null ? instruction.text : "";
 
@@ -35,6 +40,7 @@ namespace JumpNowBro.Networking
         {
             var canvas = new GameObject("TrainingGuidance", typeof(Canvas), typeof(CanvasScaler));
             canvas.transform.SetParent(transform, false);
+            canvasRect = canvas.GetComponent<RectTransform>();
             canvas.GetComponent<Canvas>().renderMode = RenderMode.ScreenSpaceOverlay;
             canvas.GetComponent<Canvas>().sortingOrder = 40;
             var scaler = canvas.GetComponent<CanvasScaler>();
@@ -43,19 +49,21 @@ namespace JumpNowBro.Networking
             scaler.matchWidthOrHeight = 0.5f;
             panel = UiKit.Panel(canvas.transform, new Color(0.06f, 0.09f, 0.15f, 0.94f));
             panel.GetComponent<Image>().raycastTarget = false;
-            var rect = panel.GetComponent<RectTransform>();
-            rect.anchorMin = rect.anchorMax = rect.pivot = new Vector2(0.5f, 0f);
-            rect.anchoredPosition = new Vector2(0, 18);
-            rect.sizeDelta = new Vector2(1000, 186);
-            heading = TextAt(27, 16, 36, FontStyles.Bold);
-            instruction = TextAt(21, 55, 65, FontStyles.Normal);
-            controls = TextAt(17, 124, 52, FontStyles.Normal);
+            panelRect = panel.GetComponent<RectTransform>();
+            panelRect.anchorMin = panelRect.anchorMax = panelRect.pivot = new Vector2(0.5f, 0f);
+            panelRect.anchoredPosition = new Vector2(0, 14);
+            heading = TextAt(22, 12, 28, FontStyles.Bold);
+            instruction = TextAt(20, 44, 52, FontStyles.Normal);
+            controls = TextAt(16, 100, 36, FontStyles.Normal);
             controls.color = new Color(0.78f, 0.87f, 1f);
+            lastRefresh = Time.unscaledTime;
         }
 
         TMP_Text TextAt(int size, float top, float height, FontStyles style)
         {
             var text = UiKit.Label(panel.transform, "", size, style);
+            text.alignment = TextAlignmentOptions.Left;
+            text.raycastTarget = false;
             var rect = text.rectTransform;
             rect.anchorMin = new Vector2(0, 1);
             rect.anchorMax = new Vector2(1, 1);
@@ -68,6 +76,8 @@ namespace JumpNowBro.Networking
         void Update()
         {
             if (panel == null || Time.unscaledTime < nextRefresh) return;
+            float elapsed = Time.unscaledTime - lastRefresh;
+            lastRefresh = Time.unscaledTime;
             nextRefresh = Time.unscaledTime + 0.1f;
             var lm = LevelManager.Instance;
             var net = NetworkManager.Instance;
@@ -78,62 +88,64 @@ namespace JumpNowBro.Networking
             if (!visible) return;
 
             var map = ControlMapStore.Instance != null ? ControlMapStore.Instance.Current : ControlMap.Default;
-            var pos = player.transform.position;
-            string lesson, message;
-            if (pos.y < -0.5f)
+            furthestX = Mathf.Max(furthestX, player.transform.position.x);
+            noteVisibleSeconds += elapsed;
+            int reached = ReachedNote();
+            if (reached > note && noteVisibleSeconds >= MinimumNoteSeconds)
             {
-                lesson = "TRY AGAIN";
-                message = "Safe landing! Take the steps on the left back up.\nThen jump from the edge and dash in the air.";
+                note++;
+                noteVisibleSeconds = 0f;
             }
-            else if (pos.x < 2f && map.moveOwner == InputOwner.P1)
-            {
-                lesson = "MOVE";
-                message = multiplayer
-                    ? (LocalOwner == InputOwner.P1
-                        ? "One character, two players. You start with MOVE, JUMP and DASH.\nHead right; the MOVE portal will give your partner MOVE."
-                        : "One character, two players. Your partner starts with MOVE, JUMP and DASH.\nAt the MOVE portal, you will take over movement. Watch the HUD.")
-                    : "You control both P1 and P2 on one character. Start by moving right.\nThe HUD shows which control set owns each action.";
-            }
-            else if (multiplayer && pos.x < jumpObstacle.position.x - 2f)
-            {
-                lesson = "SWAP";
-                message = map.moveOwner == InputOwner.P1
-                    ? (LocalOwner == InputOwner.P1
-                        ? "Cross the MOVE portal to pass MOVE to your partner.\nYou will keep JUMP and DASH."
-                        : "Your partner is approaching the MOVE portal. Get ready to move!\nThey will keep JUMP and DASH after the handoff.")
-                    : "MOVE has changed hands. Move: " + Owner(map.moveOwner) + ". Jump: " + Owner(map.jumpOwner) + ".\nWork together to reach the step.";
-            }
-            else if (pos.x < jumpObstacle.position.x + 2f)
-            {
-                lesson = "JUMP";
-                message = "Jump over the step ahead. Hold jump for more height; release for a shorter hop.\n"
-                    + (multiplayer ? "Move: " + Owner(map.moveOwner) + ". Jump: " + Owner(map.jumpOwner) + "." : "Follow the active JUMP binding below.");
-            }
-            else if (pos.x < dashLanding.position.x + 1f)
-            {
-                lesson = "DASH";
-                message = multiplayer && LocalOwner == map.moveOwner
-                    ? "Keep moving right while your partner jumps from the edge and dashes.\nThe floor below is safe if you miss. Take your time together."
-                    : "Jump near the edge, then dash right to cross the gap.\nDash recharges when you land. The floor below is safe if you miss.";
-            }
-            else if (!multiplayer && pos.x < soloSwapPosition.x + 3f)
-            {
-                lesson = "SWAP";
-                message = map.moveOwner == InputOwner.P1
-                    ? "The MOVE portal switches MOVE from P1 to P2.\nWatch the HUD and follow the MOVE binding after crossing."
-                    : "MOVE now uses P2 controls. JUMP and DASH still use P1 controls.\nUse both control sets together to continue.";
-            }
-            else
-            {
-                lesson = "PUT IT TOGETHER";
-                message = multiplayer
-                    ? "Move: " + Owner(map.moveOwner) + ". Jump: " + Owner(map.jumpOwner) + ". Clear the final step.\nReach the exit portal together to begin Level 1."
-                    : "Use P2 to move and P1 to jump over the final step.\nReach the exit portal to begin Level 1.";
-            }
-            heading.text = (multiplayer ? "CO-OP TRAINING / " : "SOLO TRAINING / ") + lesson;
-            instruction.text = message;
+
+            bool intro = note == 0;
+            heading.gameObject.SetActive(intro);
+            if (intro) heading.text = multiplayer ? "Co-op training" : "Solo training";
+            panelRect.sizeDelta = new Vector2(Mathf.Min(920, canvasRect.rect.width - 32), intro ? 144 : 112);
+            PlaceText(instruction, intro ? 44 : 12, 52);
+            PlaceText(controls, intro ? 100 : 68, 36);
+            instruction.text = NoteText();
             controls.text = Hint("Move", map.moveOwner) + "     |     " + Hint("Jump", map.jumpOwner)
                             + "     |     " + Hint("Dash", map.dashOwner);
+        }
+
+        static void PlaceText(TMP_Text text, float top, float height)
+        {
+            text.rectTransform.offsetMin = new Vector2(18, -top - height);
+            text.rectTransform.offsetMax = new Vector2(-18, -top);
+        }
+
+        int ReachedNote()
+        {
+            if (multiplayer)
+            {
+                if (furthestX >= dashLanding.position.x + 1f) return 4;
+                if (furthestX >= jumpObstacle.position.x + 2f) return 3;
+                if (furthestX >= jumpObstacle.position.x - 2f) return 2;
+                return furthestX >= 2f ? 1 : 0;
+            }
+            if (furthestX >= soloSwapPosition.x + 3f) return 4;
+            if (furthestX >= dashLanding.position.x + 1f) return 3;
+            if (furthestX >= jumpObstacle.position.x + 2f) return 2;
+            return furthestX >= 2f ? 1 : 0;
+        }
+
+        string NoteText()
+        {
+            if (note == 0)
+                return multiplayer
+                    ? "You share one character. Each action belongs to one of you.\nThe HUD and bindings show your current part."
+                    : "One character, two control sets. You use both P1 and P2.\nThe HUD and bindings show which set owns each action.";
+            if (note == 4)
+                return "Movement and jumping can have different owners.\nThe exit leads to Level 1 whenever you're ready.";
+            if (note == (multiplayer ? 2 : 1))
+                return "Holding jump gives more height; a quick tap makes a shorter hop.";
+            if (note == (multiplayer ? 3 : 2))
+                return "Dashing stops your rise, so gaining jump height first helps cross gaps.\nDash recharges on landing. The lower floor and left steps offer a safe retry.";
+            if (!multiplayer)
+                return "MOVE portals pass movement to the other control set.\nJUMP and DASH keep their owners; the bindings below follow the handoff.";
+            return LocalOwner == InputOwner.P1
+                ? "The MOVE portal hands movement to your partner.\nYou keep jumping and dashing; the HUD tracks the handoff."
+                : "The MOVE portal hands movement to you.\nYour partner keeps jumping and dashing; the HUD tracks the handoff.";
         }
 
         InputOwner LocalOwner => NetworkManager.Instance.Role == GameRole.Client ? InputOwner.P2 : InputOwner.P1;

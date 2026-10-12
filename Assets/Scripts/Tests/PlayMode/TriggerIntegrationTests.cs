@@ -371,6 +371,47 @@ namespace JumpNowBro.Tests.PlayMode
         }
 
         [UnityTest]
+        public IEnumerator TrainingNotes_AllowReadingAndDoNotReplayOnBacktracking()
+        {
+            yield return LoadLevelAndGrabPlayer(LevelManager.TrainingSceneName);
+            var lm = LevelManager.Instance;
+            int oldIndex = lm.CurrentLevelIndex;
+            var training = Object.FindAnyObjectByType<TrainingLevel>();
+            var rb = playerGo.GetComponent<Rigidbody2D>();
+            try
+            {
+                SetField(lm, "currentLevelIndex", 3);
+                yield return new WaitForSecondsRealtime(0.2f);
+                string intro = training.Instructions;
+                StringAssert.Contains("two control sets", intro);
+
+                // Reach both lessons quickly: neither should overwrite the unread intro or be skipped.
+                rb.position = new Vector2(13, 0.6f);
+                Physics2D.SyncTransforms();
+                yield return new WaitForSecondsRealtime(0.5f);
+                Assert.AreEqual(intro, training.Instructions, "Crossing a marker must not immediately replace an unread note.");
+                yield return new WaitForSecondsRealtime(5.2f);
+                string jump = training.Instructions;
+                StringAssert.Contains("Holding jump", jump);
+                Assert.IsFalse(((Component)GetField(training, "heading")).gameObject.activeSelf,
+                    "The training title belongs only to the introduction.");
+
+                yield return new WaitForSecondsRealtime(0.5f);
+                Assert.AreEqual(jump, training.Instructions);
+                yield return new WaitForSecondsRealtime(5.2f);
+                string dash = training.Instructions;
+                StringAssert.Contains("Dash recharges", dash);
+
+                rb.position = new Vector2(-3, 0.6f);
+                Physics2D.SyncTransforms();
+                yield return new WaitForSecondsRealtime(5.2f);
+                Assert.AreEqual(dash, training.Instructions,
+                    "Returning to an earlier part of the course must retain the latest note.");
+            }
+            finally { SetField(lm, "currentLevelIndex", oldIndex); }
+        }
+
+        [UnityTest]
         public IEnumerator CampaignLoadNext_SkipsTrainingAndFiresVictorySentinel()
         {
             yield return null; // Bootstrap's managers and the configured level list are ready.

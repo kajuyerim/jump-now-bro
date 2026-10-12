@@ -86,8 +86,10 @@ can be iterated without touching code.
 `Level_Training` is an optional, repeatable course selected from the menu or LAN lobby. Solo swaps
 movement after the jump/dash practice; LAN swaps it earlier so the second player participates before
 the jump lesson. `TrainingLevel` reads the character position and synchronized control map to show
-local instructions and current bindings. Physical obstacles require jumping and dashing, with a solid
-floor and return steps below the gap. It uses the existing swap and scene-load events.
+short notes and current bindings. Notes advance with the furthest point reached, stay visible for at
+least five seconds, and do not replay when backtracking. The training title appears only in the intro.
+Physical obstacles require jumping and dashing, with a solid floor and return steps below the gap.
+It uses the existing swap and scene-load events.
 
 Training is appended after the three campaign scene IDs to preserve saved records. Its exit loads
 Level 1 directly without a competitive summary; normal campaign progression skips Training and still
