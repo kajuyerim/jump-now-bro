@@ -13,11 +13,15 @@ namespace JumpNowBro.Networking
     public sealed class TrainingLevel : MonoBehaviour
     {
         [SerializeField] SwapTrigger movePortal;
-        [SerializeField] Transform jumpObstacle;
-        [SerializeField] Transform dashLanding;
-        [SerializeField] Vector3 soloSwapPosition = new Vector3(28, 2, 0);
-        [SerializeField] Vector3 multiplayerSwapPosition = new Vector3(4, 2, 0);
+        [SerializeField] float[] soloNoteStarts = { 2, 12, 20, 33, 62, 93, 108 };
+        [SerializeField] float[] multiplayerNoteStarts = { 2, 7, 12, 33, 62, 93, 108 };
+        [SerializeField] Vector3 soloSwapPosition = new Vector3(24, 1.1f, 0);
+        [SerializeField] Vector3 multiplayerSwapPosition = new Vector3(4, 1.1f, 0);
 
+        [SerializeField] float minimumViewWidth = 28f;
+
+        Camera trainingCamera;
+        float previousCameraSize;
         const float MinimumNoteSeconds = 5f;
         bool multiplayer;
         int note;
@@ -38,6 +42,8 @@ namespace JumpNowBro.Networking
 
         void Start()
         {
+            trainingCamera = Camera.main;
+            if (trainingCamera != null) previousCameraSize = trainingCamera.orthographicSize;
             var canvas = new GameObject("TrainingGuidance", typeof(Canvas), typeof(CanvasScaler));
             canvas.transform.SetParent(transform, false);
             canvasRect = canvas.GetComponent<RectTransform>();
@@ -51,12 +57,24 @@ namespace JumpNowBro.Networking
             panel.GetComponent<Image>().raycastTarget = false;
             panelRect = panel.GetComponent<RectTransform>();
             panelRect.anchorMin = panelRect.anchorMax = panelRect.pivot = new Vector2(0.5f, 0f);
-            panelRect.anchoredPosition = new Vector2(0, 14);
+            panelRect.anchoredPosition = new Vector2(0, 96);
             heading = TextAt(22, 12, 28, FontStyles.Bold);
             instruction = TextAt(20, 44, 52, FontStyles.Normal);
             controls = TextAt(16, 100, 36, FontStyles.Normal);
             controls.color = new Color(0.78f, 0.87f, 1f);
             lastRefresh = Time.unscaledTime;
+        }
+
+        void LateUpdate()
+        {
+            if (trainingCamera != null)
+                trainingCamera.orthographicSize = Mathf.Max(previousCameraSize,
+                    minimumViewWidth / (2f * Mathf.Max(0.1f, trainingCamera.aspect)));
+        }
+
+        void OnDestroy()
+        {
+            if (trainingCamera != null) trainingCamera.orthographicSize = previousCameraSize;
         }
 
         TMP_Text TextAt(int size, float top, float height, FontStyles style)
@@ -116,17 +134,10 @@ namespace JumpNowBro.Networking
 
         int ReachedNote()
         {
-            if (multiplayer)
-            {
-                if (furthestX >= dashLanding.position.x + 1f) return 4;
-                if (furthestX >= jumpObstacle.position.x + 2f) return 3;
-                if (furthestX >= jumpObstacle.position.x - 2f) return 2;
-                return furthestX >= 2f ? 1 : 0;
-            }
-            if (furthestX >= soloSwapPosition.x + 3f) return 4;
-            if (furthestX >= dashLanding.position.x + 1f) return 3;
-            if (furthestX >= jumpObstacle.position.x + 2f) return 2;
-            return furthestX >= 2f ? 1 : 0;
+            var starts = multiplayer ? multiplayerNoteStarts : soloNoteStarts;
+            for (int i = starts.Length - 1; i >= 0; i--)
+                if (furthestX >= starts[i]) return i + 1;
+            return 0;
         }
 
         string NoteText()
@@ -135,12 +146,26 @@ namespace JumpNowBro.Networking
                 return multiplayer
                     ? "You share one character. Each action belongs to one of you.\nThe HUD and bindings show your current part."
                     : "One character, two control sets. You use both P1 and P2.\nThe HUD and bindings show which set owns each action.";
+            if (note == 7)
+                return "All three actions have changed hands. Combine jumps and dashes here.\nThe exit leads to Level 1 whenever you're ready.";
+            if (note == 6)
+                return multiplayer
+                    ? LocalOwner == InputOwner.P1
+                        ? "JUMP passes to your partner at this portal, joining MOVE and DASH.\nThe last steps give them room to practice the full set."
+                        : "JUMP passes to you at this portal, joining MOVE and DASH.\nThe last steps give you room to practice the full set."
+                    : "The JUMP portal passes jumping to P2, joining MOVE and DASH.\nThe last steps give you room to practice with that control set.";
+            if (note == 5)
+                return multiplayer
+                    ? LocalOwner == InputOwner.P1
+                        ? "The airborne DASH portal passes dash to your partner; you keep JUMP.\nJump first, then watch the HUD handoff. Swaps stay applied after a miss."
+                        : "The airborne DASH portal gives you dash; your partner keeps JUMP.\nSave dash for the HUD handoff. Swaps stay applied after a miss."
+                    : "The airborne DASH portal passes dash to P2; P1 keeps JUMP.\nJump first, then use P2's dash after the HUD handoff. Misses are safe.";
             if (note == 4)
-                return "Movement and jumping can have different owners.\nThe exit leads to Level 1 whenever you're ready.";
+                return "An air dash stops your rise, so gaining jump height first helps cross gaps.\nThe lower floor and left steps offer a safe retry.";
             if (note == (multiplayer ? 2 : 1))
-                return "Holding jump gives more height; a quick tap makes a shorter hop.";
+                return "Holding jump gives more height; a quick tap makes a shorter hop.\nThe low blocks give you room to try both.";
             if (note == (multiplayer ? 3 : 2))
-                return "Dashing stops your rise, so gaining jump height first helps cross gaps.\nDash recharges on landing. The lower floor and left steps offer a safe retry.";
+                return "Dash gives a short horizontal burst, on the ground or in the air.\nDash recharges on landing. This runway is a safe place to try it.";
             if (!multiplayer)
                 return "MOVE portals pass movement to the other control set.\nJUMP and DASH keep their owners; the bindings below follow the handoff.";
             return LocalOwner == InputOwner.P1

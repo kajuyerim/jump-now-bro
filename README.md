@@ -163,7 +163,8 @@ Start every instance from `Bootstrap.unity`; the main menu drives the session:
 - **Solo**, single-player on one machine (drive both input halves yourself), no lobby.
 - **Training**, available in the menu and the host's lobby level picker. The same safe course teaches
   both modes: solo introduces the two control sets, while LAN introduces the swap earlier and shows
-  each player their own role. Prompts follow rebound keys and gamepad bindings. Missed jumps land on
+  each player their own role. MOVE, airborne DASH, and JUMP handoffs lead into a final jump-and-dash
+  section. Prompts follow rebound keys and gamepad bindings. Missed jumps land on
   a recovery floor; finishing Training starts Level 1 without recording competitive stats.
 - **Leave**, graceful disconnect (sends `GOODBYE`) back to the menu, from the lobby or mid-game.
 

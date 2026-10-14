@@ -344,15 +344,22 @@ namespace JumpNowBro.Tests.PlayMode
 
             var training = ComponentsIn<TrainingLevel>(scene).SingleOrDefault();
             Assert.IsNotNull(training, "Training scene must have exactly one TrainingLevel behaviour.");
+            Assert.That(Camera.main.orthographicSize * Camera.main.aspect * 2f, Is.GreaterThanOrEqualTo(27.99f),
+                "Training must frame the takeoff and far landing even in a narrow viewport.");
             var portal = (SwapTrigger)GetField(training, "movePortal");
-            var jumpObstacle = (Transform)GetField(training, "jumpObstacle");
-            var dashLanding = (Transform)GetField(training, "dashLanding");
             Assert.IsNotNull(portal, "TrainingLevel.movePortal is not wired.");
-            Assert.IsNotNull(jumpObstacle, "TrainingLevel.jumpObstacle is not wired.");
-            Assert.IsNotNull(dashLanding, "TrainingLevel.dashLanding is not wired.");
             Assert.AreEqual(scene, portal.gameObject.scene);
-            Assert.AreEqual(scene, jumpObstacle.gameObject.scene);
-            Assert.AreEqual(scene, dashLanding.gameObject.scene);
+            var swaps = ComponentsIn<SwapTrigger>(scene);
+            CollectionAssert.AreEquivalent(new[] { PlayerAction.MoveHorizontal, PlayerAction.Jump, PlayerAction.Dash },
+                swaps.Select(t => (PlayerAction)GetField(t, "actionToSwap")));
+            foreach (var swap in swaps)
+            {
+                Assert.AreEqual((byte)((PlayerAction)GetField(swap, "actionToSwap") + 1),
+                    (byte)GetField(swap, "triggerId"), "Each action keeps its stable portal ID.");
+                Assert.That(swap.GetComponentInChildren<SpriteRenderer>().bounds.size.x, Is.EqualTo(2.2f).Within(0.01f));
+            }
+            Assert.That(ComponentsIn<LevelGoal>(scene).Single().GetComponentInChildren<SpriteRenderer>().bounds.size.x,
+                Is.EqualTo(2.2f).Within(0.01f));
 
             var start = GameObjectsIn(scene).Single(go => go.name == "StartPlatform").GetComponent<BoxCollider2D>();
             var landing = GameObjectsIn(scene).Single(go => go.name == "LandingPlatform").GetComponent<BoxCollider2D>();
@@ -371,6 +378,98 @@ namespace JumpNowBro.Tests.PlayMode
         }
 
         [UnityTest]
+        public IEnumerator TrainingGaps_AllowVariedDashTimingAndRequireAnAirDash()
+        {
+            yield return LoadLevelAndGrabPlayer(LevelManager.TrainingSceneName);
+            var world = playerGo.GetComponent<PlayerCollisionConfig>().CreateWorld(playerGo.GetComponent<Rigidbody2D>());
+            var tuning = player.Tuning.AsMovementTuning(Time.fixedDeltaTime, player.FallLimitY);
+            foreach (var pair in new[] { ("StartPlatform", "LandingPlatform"), ("HandoffTakeoff", "HandoffLanding"), ("HandoffLanding", "FinalLanding") })
+            {
+                var takeoff = GameObject.Find(pair.Item1).GetComponent<BoxCollider2D>().bounds;
+                var landing = GameObject.Find(pair.Item2).GetComponent<BoxCollider2D>().bounds;
+                foreach (float back in new[] { 0.3f, 0.8f, 1.3f })
+                foreach (float delay in new[] { 0.25f, 0.4f, 0.55f, 10f })
+                {
+                    var state = new MovementState { posX = takeoff.max.x - back, posY = takeoff.max.y + 0.51f,
+                        state = MoveState.Grounded, facing = 1, dashChargeAvailable = true };
+                    bool dashed = false, landed = false;
+                    for (int tick = 0; tick < 150; tick++)
+                    {
+                        bool pressDash = !dashed && tick * Time.fixedDeltaTime >= delay;
+                        dashed |= pressDash;
+                        (state, _) = Movement.Step(state, new EffectiveInput { moveDir = 1, jumpPressed = tick == 0,
+                            jumpHeld = true, dashPressed = pressDash }, tuning, Time.fixedDeltaTime, world);
+                        if (state.posX >= landing.min.x + 0.5f && world.Grounded(state.posX, state.posY)) { landed = true; break; }
+                        if (state.posY < landing.max.y - 1f) break;
+                    }
+                    Assert.AreEqual(delay < 1f, landed, $"{pair.Item1}: takeoff {back} units before edge, dash after {delay}s");
+                }
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator TrainingHandoffs_TransferDashInAirBeforeNewOwnerUsesIt()
+        {
+            yield return LoadLevelAndGrabPlayer(LevelManager.TrainingSceneName);
+            var store = ControlMapStore.Instance;
+            var oldMap = store.Current;
+            var inputs = new[] { new HazardTestInput(), new HazardTestInput() };
+            var rb = playerGo.GetComponent<Rigidbody2D>();
+            var world = playerGo.GetComponent<PlayerCollisionConfig>().CreateWorld(rb);
+            var portals = Object.FindObjectsByType<SwapTrigger>();
+            SwapTrigger Portal(PlayerAction action) => portals.Single(t => (PlayerAction)GetField(t, "actionToSwap") == action);
+            int dashes = 0;
+            InputOwner dashOwner = InputOwner.P1;
+            void OnDash() { dashes++; dashOwner = store.Current.dashOwner; }
+            player.OnDash += OnDash;
+            try
+            {
+                SwapScheduleDriver.Instance.Scheduler.ResetTo(ControlMap.Default);
+                store.Apply(ControlMap.Default);
+                yield return DriveInto(Portal(PlayerAction.MoveHorizontal).GetComponent<Collider2D>());
+                for (int i = 0; i < 24; i++) yield return new WaitForFixedUpdate();
+                Assert.AreEqual(InputOwner.P2, store.Current.moveOwner);
+                var takeoff = GameObject.Find("HandoffTakeoff").GetComponent<BoxCollider2D>().bounds;
+                rb.position = new Vector2(takeoff.max.x - 0.8f, takeoff.max.y + 0.52f);
+                SetField(player, "currentState", new MovementState { state = MoveState.Grounded, facing = 1, dashChargeAvailable = true });
+                Physics2D.SyncTransforms();
+                inputs[0].jumpPressed = inputs[0].jumpHeld = true;
+                inputs[1].moveRight = true;
+                player.Inject(inputs[0], inputs[1]);
+                for (int i = 0; i < 40 && store.Current.dashOwner == InputOwner.P1; i++) yield return new WaitForFixedUpdate();
+                Assert.AreEqual(InputOwner.P2, store.Current.dashOwner, "Crossing the airborne portal must schedule the DASH handoff.");
+                Assert.IsFalse(world.Grounded(rb.position.x, rb.position.y), "The transfer must apply in the air.");
+                Assert.AreEqual(InputOwner.P1, store.Current.jumpOwner, "The partner must still own JUMP during the challenge.");
+                for (int i = 0; i < 6; i++) yield return new WaitForFixedUpdate(); // recipient reaction time after the scheduled handoff
+                inputs[1].dashPressed = true;
+                var landing = GameObject.Find("HandoffLanding").GetComponent<BoxCollider2D>().bounds;
+                bool landed = false;
+                for (int i = 0; i < 90; i++)
+                {
+                    yield return new WaitForFixedUpdate();
+                    if (rb.position.x >= landing.min.x + 0.5f && world.Grounded(rb.position.x, rb.position.y)) { landed = true; break; }
+                }
+                Assert.AreEqual(1, dashes);
+                Assert.AreEqual(InputOwner.P2, dashOwner);
+                Assert.IsTrue(landed, "The new owner's dash must reach the broad landing.");
+                Assert.AreEqual(0, player.DeathCount);
+                player.Inject(null, null);
+                yield return DriveInto(Portal(PlayerAction.Jump).GetComponent<Collider2D>());
+                for (int i = 0; i < 24; i++) yield return new WaitForFixedUpdate();
+                Assert.AreEqual(InputOwner.P2, store.Current.jumpOwner);
+                Assert.AreEqual(InputOwner.P2, store.Current.dashOwner);
+                Assert.AreEqual(InputOwner.P2, store.Current.moveOwner);
+            }
+            finally
+            {
+                player.OnDash -= OnDash;
+                player.Inject(null, null);
+                SwapScheduleDriver.Instance.Scheduler.ResetTo(oldMap);
+                store.Apply(oldMap);
+            }
+        }
+
+        [UnityTest]
         public IEnumerator TrainingNotes_AllowReadingAndDoNotReplayOnBacktracking()
         {
             yield return LoadLevelAndGrabPlayer(LevelManager.TrainingSceneName);
@@ -382,6 +481,12 @@ namespace JumpNowBro.Tests.PlayMode
             {
                 SetField(lm, "currentLevelIndex", 3);
                 yield return new WaitForSecondsRealtime(0.2f);
+                Canvas.ForceUpdateCanvases();
+                var panelCorners = new Vector3[4];
+                var iconCorners = new Vector3[4];
+                ((RectTransform)GetField(training, "panelRect")).GetWorldCorners(panelCorners);
+                ((RectTransform)GameHudOverlay.Instance.transform.Find("SwapProximityIcon")).GetWorldCorners(iconCorners);
+                Assert.Greater(panelCorners[0].y, iconCorners[1].y, "Notes must not overlap the upcoming-swap icon.");
                 string intro = training.Instructions;
                 StringAssert.Contains("two control sets", intro);
 
@@ -528,6 +633,7 @@ namespace JumpNowBro.Tests.PlayMode
         [UnityTest]
         public IEnumerator TrainingGoal_LoadsLevelOneWithoutSummaryOrCompetitiveAccounting()
         {
+            float campaignCameraSize = Camera.main.orthographicSize;
             yield return LoadLevelAndGrabPlayer(LevelManager.TrainingSceneName);
             var lm = LevelManager.Instance;
             var rsc = RunSummaryController.Instance;
@@ -559,6 +665,8 @@ namespace JumpNowBro.Tests.PlayMode
                 Assert.AreEqual(0, lm.CurrentLevelIndex);
                 Assert.IsTrue(SceneManager.GetSceneByName("Level_01").isLoaded);
                 Assert.IsFalse(SceneManager.GetSceneByName(LevelManager.TrainingSceneName).isLoaded);
+                Assert.That(Camera.main.orthographicSize, Is.EqualTo(campaignCameraSize).Within(0.001f),
+                    "Leaving training must restore the campaign camera framing.");
                 Assert.IsFalse(rsc.HoldActive, "Training completion must not show the competitive summary.");
                 Assert.IsFalse(lm.SummaryHold);
                 Assert.AreEqual(totalsBefore.levels, rsc.Totals.levels);
