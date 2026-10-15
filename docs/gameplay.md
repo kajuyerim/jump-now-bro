@@ -82,3 +82,25 @@ Three short levels (`Level_01/02/03`) load **additively over a persistent `Boots
 `Bootstrap` resident (and at build index 0) is what lets the byte-encoded scene index in the protocol stay
 stable, and it's why you always start from `Bootstrap`. Starting tuning constants (run 9, jump 16, gravity 50, coyote/buffer 0.1 s, dash 4 units over 0.15 s) live on a `PlayerTuning` ScriptableObject so they
 can be iterated without touching code.
+
+`Level_Training` is an optional, repeatable course selected from the menu or LAN lobby. It teaches
+variable-height jumps, ground dashes, and air dashes, then combines those actions with MOVE, DASH,
+and JUMP ownership handoffs. Solo swaps movement after the basic practice; LAN swaps it before the
+jump lesson so both people participate. The DASH portal sits early in an airborne arc above an
+elevated takeoff, with a lower, broad landing to allow the scheduled transfer and the recipient's
+reaction. JUMP transfers last so both partners still participate in the airborne handoff. Each action
+swaps once; missing a jump does not undo a swap or refund a dash until landing. The DASH trigger also
+covers airborne recovery approaches so jumping from the return steps cannot bypass the handoff.
+
+`TrainingLevel` reads the character position and synchronized control map to show short notes and
+current bindings. Scene-authored note positions differ by mode. Notes advance in order with the
+furthest point reached, stay visible for at least five seconds, and do not replay when backtracking.
+Reading time and note advancement pause while Settings covers the guidance.
+The training title appears only in the intro. A training-only camera zoom keeps at least 28 world units
+visible horizontally so narrow views show the far landing; leaving restores the campaign zoom. All three
+gaps have solid recovery ground and return steps; there are no damaging hazards or time limits. The course
+uses existing swap and scene-load events.
+
+Training is appended after the three campaign scene IDs to preserve saved records. Its exit loads
+Level 1 directly without a competitive summary; normal campaign progression skips Training and still
+ends after Level 3. This does not add level-unlock or saved-progression rules.

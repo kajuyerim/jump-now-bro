@@ -66,7 +66,11 @@ namespace JumpNowBro.Gameplay
         void HandleSceneLoaded(Scene scene, LoadSceneMode mode)
         {
             if (mode != LoadSceneMode.Additive) return;
-            if (levelLabel != null) levelLabel.text = Pretty(scene.name);
+            var levelManager = LevelManager.Instance;
+            bool training = levelManager != null && levelManager.IsTraining(levelManager.CurrentLevelIndex);
+            if (levelLabel != null)
+                levelLabel.text = training ? levelManager.GetLevelDisplayName(levelManager.CurrentLevelIndex) : Pretty(scene.name);
+            if (deathLabel != null) deathLabel.gameObject.SetActive(!training);
         }
 
         // "Level_01" -> "Level 1" (drop the underscore + leading zero).

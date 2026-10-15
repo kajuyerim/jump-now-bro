@@ -144,7 +144,7 @@ The deep dives, with the full set of diagrams, live in [`docs/`](docs/):
 3. Open `Assets/Scenes/Bootstrap.unity` and press **Play**, it loads Level 1 additively and spawns the
    player. *Always start from `Bootstrap`*; the persistent managers live there.
 4. For a standalone build, use **File → Build Profiles** (macOS or Linux). The scene list (`Bootstrap`
-   at index 0 + the three levels) is already configured.
+   at index 0, the three campaign levels, and Training) is already configured.
 
 > Cloning with sprites intact needs **Git LFS installed before `git clone`** (binary assets are
 > LFS-tracked). If you cloned without it: `git lfs install && git lfs pull`.
@@ -161,6 +161,11 @@ Start every instance from `Bootstrap.unity`; the main menu drives the session:
   (default `127.0.0.1` for same-machine testing). The client lands in the lobby, toggles **Ready**, and
   drives Player 2 once the host starts. (Ready-up rides the reliable `EVENT` channel, protocol v3.)
 - **Solo**, single-player on one machine (drive both input halves yourself), no lobby.
+- **Training**, available in the menu and the host's lobby level picker. The same safe course teaches
+  both modes: solo introduces the two control sets, while LAN introduces the swap earlier and shows
+  each player their own role. MOVE, airborne DASH, and JUMP handoffs lead into a final jump-and-dash
+  section. Prompts follow rebound keys and gamepad bindings. Missed jumps land on
+  a recovery floor; finishing Training starts Level 1 without recording competitive stats.
 - **Leave**, graceful disconnect (sends `GOODBYE`) back to the menu, from the lobby or mid-game.
 
 If a peer drops mid-game, the surviving side pauses with a "connection lost" overlay: the client can

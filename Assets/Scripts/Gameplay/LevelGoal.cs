@@ -22,6 +22,12 @@ namespace JumpNowBro.Gameplay
             }
 
             fired = true;
+            if (manager.IsTraining(manager.CurrentLevelIndex))
+            {
+                manager.LoadNext();
+                return;
+            }
+
             // #130: route through the summary hold (freeze + stats card + Continue). NotifyGoalReached falls
             // back to the old instant LoadNext itself when no tracked run is live; the null check here only
             // covers a missing controller (never expected — it self-spawns).
