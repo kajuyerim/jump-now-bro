@@ -470,6 +470,76 @@ namespace JumpNowBro.Tests.PlayMode
         }
 
         [UnityTest]
+        public IEnumerator TrainingDashRecovery_CannotReachLandingWithoutHandoff()
+        {
+            yield return LoadLevelAndGrabPlayer(LevelManager.TrainingSceneName);
+            var rb = playerGo.GetComponent<Rigidbody2D>();
+            var world = playerGo.GetComponent<PlayerCollisionConfig>().CreateWorld(rb);
+            var tuning = player.Tuning.AsMovementTuning(Time.fixedDeltaTime, player.FallLimitY);
+            var landing = GameObject.Find("HandoffLanding").GetComponent<BoxCollider2D>().bounds;
+            var store = ControlMapStore.Instance;
+            var oldMap = store.Current;
+            bool requested = false, requestedInAir = false;
+            int landedRoutes = 0;
+            void OnSwap(SwapRequest request)
+            {
+                if (request.action != PlayerAction.Dash) return;
+                requested = true;
+                requestedInAir = !world.Grounded(rb.position.x, rb.position.y);
+            }
+            SwapTrigger.OnSwapRequested += OnSwap;
+            try
+            {
+                foreach (string step in new[] { "HandoffReturnTop", "HandoffReturnMiddle", "HandoffReturnLower", "HandoffReturnBottom" })
+                foreach (float delay in new[] { 0.15f, 0.25f, 0.4f })
+                {
+                    rb.position = new Vector2(1000, 1000);
+                    Physics2D.SyncTransforms();
+                    yield return new WaitForFixedUpdate();
+                    SwapScheduleDriver.Instance.Scheduler.ResetTo(ControlMap.Default);
+                    store.Apply(ControlMap.Default);
+                    SwapTrigger.ReconcileBannersTo(ControlMap.Default);
+                    requested = requestedInAir = false;
+                    var bounds = GameObject.Find(step).GetComponent<BoxCollider2D>().bounds;
+                    var state = new MovementState { posX = bounds.min.x + 0.7f, posY = bounds.max.y + 0.515f,
+                        state = MoveState.Grounded, facing = 1, dashChargeAvailable = true };
+                    rb.position = new Vector2(state.posX, state.posY);
+                    Physics2D.SyncTransforms();
+                    yield return new WaitForFixedUpdate();
+                    bool dashed = false, landed = false, appliedInAir = false;
+                    for (int tick = 0; tick < 100; tick++)
+                    {
+                        bool pressDash = !dashed && tick * Time.fixedDeltaTime >= delay;
+                        dashed |= pressDash;
+                        (state, _) = Movement.Step(state, new EffectiveInput { moveDir = 1, jumpPressed = tick == 0,
+                            jumpHeld = true, dashPressed = pressDash }, tuning, Time.fixedDeltaTime, world);
+                        rb.MovePosition(new Vector2(state.posX, state.posY));
+                        yield return new WaitForFixedUpdate();
+                        appliedInAir |= store.Current.dashOwner == InputOwner.P2 && !world.Grounded(rb.position.x, rb.position.y);
+                        if (state.posX >= landing.min.x + 0.5f && world.Grounded(state.posX, state.posY)) { landed = true; break; }
+                        if (state.posY < -3.4f) break;
+                    }
+                    if (step == "HandoffReturnTop" && delay == 0.25f)
+                        Assert.IsTrue(landed, "The reported retry route should remain playable.");
+                    if (!landed) continue;
+                    landedRoutes++;
+                    Assert.IsTrue(requested, $"{step}, dash after {delay}s bypassed the DASH lesson.");
+                    Assert.IsTrue(requestedInAir, "Recovery must still encounter the DASH handoff in the air.");
+                    Assert.IsTrue(appliedInAir, $"{step}, dash after {delay}s: scheduled handoff must apply before landing.");
+                    for (int i = 0; i < 24; i++) yield return new WaitForFixedUpdate();
+                    Assert.AreEqual(InputOwner.P2, store.Current.dashOwner);
+                }
+                Assert.Greater(landedRoutes, 1, "Exercise successful retries from more than one timing.");
+            }
+            finally
+            {
+                SwapTrigger.OnSwapRequested -= OnSwap;
+                SwapScheduleDriver.Instance.Scheduler.ResetTo(oldMap);
+                store.Apply(oldMap);
+            }
+        }
+
+        [UnityTest]
         public IEnumerator TrainingNotes_AllowReadingAndDoNotReplayOnBacktracking()
         {
             yield return LoadLevelAndGrabPlayer(LevelManager.TrainingSceneName);
@@ -495,7 +565,19 @@ namespace JumpNowBro.Tests.PlayMode
                 Physics2D.SyncTransforms();
                 yield return new WaitForSecondsRealtime(0.5f);
                 Assert.AreEqual(intro, training.Instructions, "Crossing a marker must not immediately replace an unread note.");
-                yield return new WaitForSecondsRealtime(5.2f);
+                var settings = SettingsPanel.Instance;
+                Assert.IsNotNull(settings);
+                settings.Open();
+                yield return new WaitForSecondsRealtime(0.2f);
+                float readTime = (float)GetField(training, "noteVisibleSeconds");
+                yield return new WaitForSecondsRealtime(10.2f);
+                Assert.AreEqual(intro, training.Instructions, "Settings must not consume unread lessons.");
+                Assert.AreEqual(readTime, (float)GetField(training, "noteVisibleSeconds"),
+                    "Only time with readable guidance counts toward advancing a note.");
+                settings.Close();
+                Assert.AreEqual(intro, training.Instructions, "Closing Settings must resume the same note.");
+                float deadline = Time.realtimeSinceStartup + 6f;
+                while (training.Instructions == intro && Time.realtimeSinceStartup < deadline) yield return null;
                 string jump = training.Instructions;
                 StringAssert.Contains("Holding jump", jump);
                 Assert.IsFalse(((Component)GetField(training, "heading")).gameObject.activeSelf,
@@ -513,7 +595,11 @@ namespace JumpNowBro.Tests.PlayMode
                 Assert.AreEqual(dash, training.Instructions,
                     "Returning to an earlier part of the course must retain the latest note.");
             }
-            finally { SetField(lm, "currentLevelIndex", oldIndex); }
+            finally
+            {
+                if (SettingsPanel.Instance != null && SettingsPanel.Instance.IsOpen) SettingsPanel.Instance.Close();
+                SetField(lm, "currentLevelIndex", oldIndex);
+            }
         }
 
         [UnityTest]

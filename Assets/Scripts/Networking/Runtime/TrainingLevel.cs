@@ -101,7 +101,8 @@ namespace JumpNowBro.Networking
             var net = NetworkManager.Instance;
             var player = PlayerSpawner.Instance != null ? PlayerSpawner.Instance.CurrentPlayerInstance : null;
             bool visible = player != null && lm != null && lm.IsTraining(lm.CurrentLevelIndex)
-                           && !lm.IsLoading && (net == null || (!net.InLobby && !net.ConnectionLost));
+                           && !lm.IsLoading && (net == null || (!net.InLobby && !net.ConnectionLost))
+                           && (SettingsPanel.Instance == null || !SettingsPanel.Instance.IsOpen);
             panel.SetActive(visible);
             if (!visible) return;
 
